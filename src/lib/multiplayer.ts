@@ -41,9 +41,19 @@ function connect(url: string): Promise<void> {
     }
     
     serverUrl = url;
-    ws = new WebSocket(url);
+    
+    // Convert https:// URLs to wss:// for WebSocket
+    const wsUrl = url.replace(/^https:/, "wss:").replace(/^http:/, "ws:");
+    console.log("[MP] Connecting to:", wsUrl);
+    
+    ws = new WebSocket(wsUrl);
+    let timeout = setTimeout(() => {
+      reject(new Error("WebSocket connection timeout"));
+      ws?.close();
+    }, 15000); // 15 second timeout
     
     ws.onopen = () => {
+      clearTimeout(timeout);
       console.log("[MP] Connected to game server");
       // Start ping interval
       if (pingTimer) clearInterval(pingTimer);
