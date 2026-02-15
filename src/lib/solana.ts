@@ -17,8 +17,8 @@ export const PLAYER_HAND_SEED = Buffer.from("player_hand");
 export const BETTING_POOL_SEED = Buffer.from("betting_pool");
 export const BET_SEED = Buffer.from("bet");
 
-// Connection endpoints
-export const DEVNET_RPC = "https://api.devnet.solana.com";
+// Connection endpoints (Helius RPC for better reliability)
+export const DEVNET_RPC = "https://devnet.helius-rpc.com/?api-key=f3417b56-61ad-4ba8-b0f9-3695ea859a58";
 export const MAINNET_RPC = "https://api.mainnet-beta.solana.com";
 
 // Derive PDAs

@@ -16,7 +16,7 @@ export default function WalletContextProvider({
 }: {
   children: ReactNode;
 }) {
-  const endpoint = useMemo(() => "https://api.devnet.solana.com", []);
+  const endpoint = useMemo(() => "https://devnet.helius-rpc.com/?api-key=f3417b56-61ad-4ba8-b0f9-3695ea859a58", []);
 
   const wallets = useMemo(
     () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
