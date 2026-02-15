@@ -1,0 +1,20 @@
+[package]
+name = "privatepoker"
+version = "0.1.0"
+description = "Private Poker with Betting on MagicBlock Ephemeral Rollups"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "privatepoker"
+
+[features]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+cpi = ["no-entrypoint"]
+default = []
+
+[dependencies]
+anchor-lang = "0.32.1"
+ephemeral-rollups-sdk = "0.8"
