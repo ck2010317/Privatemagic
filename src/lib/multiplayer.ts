@@ -13,10 +13,15 @@ let serverUrl = "";
 
 export function getServerUrl(): string {
   if (typeof window === "undefined") return "";
-  // Check for environment variable first, then fall back
+  // Check for environment variable first
   const envUrl = process.env.NEXT_PUBLIC_WS_SERVER;
   if (envUrl) return envUrl;
-  // Default: localhost for dev
+  // Production: Render server
+  const isProd = typeof window !== "undefined" && window.location.hostname !== "localhost";
+  if (isProd) {
+    return "wss://privatemagic.onrender.com";
+  }
+  // Dev: localhost
   return "ws://localhost:8080";
 }
 
