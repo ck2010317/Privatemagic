@@ -8,8 +8,8 @@ export const ER_VALIDATOR = new PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2
 export const PERMISSION_PROGRAM_ID = new PublicKey("ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1");
 export const DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
-// Program ID (update after deployment)
-export const PROGRAM_ID = new PublicKey("11111111111111111111111111111111");
+// Program ID (deployed on devnet)
+export const PROGRAM_ID = new PublicKey("ErDUq4vQDtAWzmksTD4vxoh3AQFijNFVYLTxJCQaqybq");
 
 // Seeds
 export const GAME_SEED = Buffer.from("poker_game");

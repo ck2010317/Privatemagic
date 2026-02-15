@@ -1,14 +1,9 @@
 use anchor_lang::prelude::*;
-use ephemeral_rollups_sdk::access_control::instructions::{
-    CreatePermissionCpiBuilder, UpdatePermissionCpiBuilder,
-};
-use ephemeral_rollups_sdk::access_control::structs::{Member, MembersArgs};
 use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
-use ephemeral_rollups_sdk::consts::PERMISSION_PROGRAM_ID;
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
 use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
-declare_id!("PokerPriv111111111111111111111111111111111");
+declare_id!("ErDUq4vQDtAWzmksTD4vxoh3AQFijNFVYLTxJCQaqybq");
 
 // Seeds
 pub const GAME_SEED: &[u8] = b"poker_game";
@@ -21,6 +16,7 @@ pub const MAX_COMMUNITY_CARDS: usize = 5;
 pub const MAX_HAND_CARDS: usize = 2;
 pub const DECK_SIZE: usize = 52;
 
+#[ephemeral]
 #[program]
 pub mod privatepoker {
     use super::*;
@@ -229,11 +225,13 @@ pub mod privatepoker {
         Ok(())
     }
 
-    /// 6️⃣ Reveal winner and settle the pot
+    /// 6️⃣ Reveal winner and settle the pot (commits state back to Solana L1)
     pub fn reveal_winner(ctx: Context<RevealWinner>, winner_index: u8) -> Result<()> {
         let game = &mut ctx.accounts.game;
-        let player1_hand = &ctx.accounts.player1_hand;
-        let player2_hand = &ctx.accounts.player2_hand;
+        let _player1_hand = &ctx.accounts.player1_hand;
+        let _player2_hand = &ctx.accounts.player2_hand;
+        let magic_program = &ctx.accounts.magic_program.to_account_info();
+        let magic_context = &ctx.accounts.magic_context.to_account_info();
 
         require!(game.phase == GamePhase::Showdown, GameError::InvalidPhase);
 
@@ -250,19 +248,16 @@ pub mod privatepoker {
             }
         }
 
-        // Make permissions public for verification
-        let permission_program = &ctx.accounts.permission_program.to_account_info();
+        game.phase = GamePhase::Settled;
 
-        UpdatePermissionCpiBuilder::new(permission_program)
-            .permissioned_account(&game.to_account_info(), true)
-            .authority(&game.to_account_info(), false)
-            .permission(&ctx.accounts.permission_game.to_account_info())
-            .args(MembersArgs { members: None })
-            .invoke_signed(&[&[
-                GAME_SEED,
-                &game.game_id.to_le_bytes(),
-                &[ctx.bumps.game],
-            ]])?;
+        // Commit game state back to Solana L1 and undelegate from ER
+        game.exit(&crate::ID)?;
+        commit_and_undelegate_accounts(
+            &ctx.accounts.payer,
+            vec![&game.to_account_info()],
+            magic_context,
+            magic_program,
+        )?;
 
         msg!("Winner revealed for game {}: {:?}", game.game_id, game.winner);
         Ok(())
@@ -385,9 +380,10 @@ pub mod privatepoker {
         Ok(())
     }
 
-    // =================== DELEGATION & PERMISSIONS ===================
+    // =================== DELEGATION (MagicBlock Ephemeral Rollups) ===================
 
-    /// Delegate a PDA to TEE validator
+    /// Delegate a PDA to the TEE validator for Ephemeral Rollup processing
+    /// Cards are encrypted and processed inside Intel TDX TEE
     pub fn delegate_pda(ctx: Context<DelegatePda>, account_type: AccountType) -> Result<()> {
         let seed_data = derive_seeds_from_account_type(&account_type);
         let seeds_refs: Vec<&[u8]> = seed_data.iter().map(|s| s.as_slice()).collect();
@@ -402,40 +398,6 @@ pub mod privatepoker {
                 ..Default::default()
             },
         )?;
-        Ok(())
-    }
-
-    /// Create permission for an account
-    pub fn create_permission(
-        ctx: Context<CreatePermission>,
-        account_type: AccountType,
-        members: Option<Vec<Member>>,
-    ) -> Result<()> {
-        let CreatePermission {
-            permissioned_account,
-            permission,
-            payer,
-            permission_program,
-            system_program,
-        } = ctx.accounts;
-
-        let seed_data = derive_seeds_from_account_type(&account_type);
-        let (_, bump) = Pubkey::find_program_address(
-            &seed_data.iter().map(|s| s.as_slice()).collect::<Vec<_>>(),
-            &crate::ID,
-        );
-        let mut seeds = seed_data.clone();
-        seeds.push(vec![bump]);
-        let seed_refs: Vec<&[u8]> = seeds.iter().map(|s| s.as_slice()).collect();
-
-        CreatePermissionCpiBuilder::new(&permission_program)
-            .permissioned_account(&permissioned_account.to_account_info())
-            .permission(&permission)
-            .payer(&payer)
-            .system_program(&system_program)
-            .args(MembersArgs { members })
-            .invoke_signed(&[seed_refs.as_slice()])?;
-
         Ok(())
     }
 }
@@ -602,24 +564,8 @@ pub struct RevealWinner<'info> {
     )]
     pub player2_hand: Account<'info, PlayerHand>,
 
-    /// CHECK: Checked by the permission program
-    #[account(mut)]
-    pub permission_game: UncheckedAccount<'info>,
-
-    /// CHECK: Checked by the permission program
-    #[account(mut)]
-    pub permission1: UncheckedAccount<'info>,
-
-    /// CHECK: Checked by the permission program
-    #[account(mut)]
-    pub permission2: UncheckedAccount<'info>,
-
     #[account(mut)]
     pub payer: Signer<'info>,
-
-    /// CHECK: PERMISSION PROGRAM
-    #[account(address = PERMISSION_PROGRAM_ID)]
-    pub permission_program: UncheckedAccount<'info>,
 }
 
 // Betting Pool Accounts
@@ -701,7 +647,7 @@ pub struct ClaimBetWinnings<'info> {
     pub bettor: Signer<'info>,
 }
 
-/// Unified delegate PDA context
+/// Unified delegate PDA context - delegates account to MagicBlock TEE validator
 #[delegate]
 #[derive(Accounts)]
 pub struct DelegatePda<'info> {
@@ -712,28 +658,8 @@ pub struct DelegatePda<'info> {
     #[account(mut)]
     pub payer: Signer<'info>,
 
-    /// CHECK: Optional validator
+    /// CHECK: Optional validator (TEE validator pubkey)
     pub validator: Option<AccountInfo<'info>>,
-}
-
-#[derive(Accounts)]
-pub struct CreatePermission<'info> {
-    /// CHECK: The permissioned account
-    #[account(mut)]
-    pub permissioned_account: AccountInfo<'info>,
-
-    /// CHECK: The permission PDA
-    #[account(mut)]
-    pub permission: AccountInfo<'info>,
-
-    #[account(mut)]
-    pub payer: Signer<'info>,
-
-    /// CHECK: Permission program
-    #[account(address = PERMISSION_PROGRAM_ID)]
-    pub permission_program: AccountInfo<'info>,
-
-    pub system_program: Program<'info, System>,
 }
 
 // =================== DATA STRUCTURES ===================

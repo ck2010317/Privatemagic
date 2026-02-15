@@ -110,10 +110,10 @@ export default function Home() {
           {/* Features */}
           <div className="flex flex-wrap justify-center gap-4 mt-2">
             {[
-              { icon: "��", label: "TEE Encrypted Cards" },
-              { icon: "⚡", label: "<50ms Latency" },
-              { icon: "🎰", label: "Spectator Betting" },
-              { icon: "💰", label: "Real SOL Stakes" },
+              { icon: "🔒", label: "TEE Encrypted Cards" },
+              { icon: "⚡", label: "Ephemeral Rollup" },
+              { icon: "🎰", label: "On-Chain Betting" },
+              { icon: "💰", label: "Solana L1 Settlement" },
             ].map((f) => (
               <div
                 key={f.label}
@@ -229,7 +229,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="fixed bottom-0 left-0 right-0 py-2 text-center pointer-events-none z-0">
         <div className="text-gray-600 text-[10px]">
-          Private Poker • MagicBlock Private Ephemeral Rollup • Intel TDX • Solana Devnet
+          Private Poker • Program: ErDUq4v...qybq • MagicBlock Ephemeral Rollup • Intel TDX TEE • Solana Devnet
         </div>
       </footer>
     </div>
