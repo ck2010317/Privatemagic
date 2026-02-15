@@ -5,6 +5,7 @@ import { useGameStore } from "@/lib/gameStore";
 import PlayerSeat from "./PlayerSeat";
 import CommunityCards from "./CommunityCards";
 import ActionBar from "./ActionBar";
+import { lamportsToSol } from "@/lib/solana";
 
 export default function PokerTable() {
   const {
@@ -21,6 +22,9 @@ export default function PokerTable() {
     winnerHandResult,
     isAnimating,
     aiMessage,
+    isOnChain,
+    txPending,
+    buyIn,
   } = useGameStore();
 
   const phaseLabels: Record<string, string> = {
@@ -81,9 +85,19 @@ export default function PokerTable() {
 
           {/* Privacy Badge */}
           <div className="absolute top-4 right-6 z-10">
-            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 backdrop-blur-md rounded-full border border-emerald-500/30">
-              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-              <span className="text-emerald-300 text-[10px] font-medium">TEE Encrypted</span>
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 backdrop-blur-md rounded-full border ${
+              isOnChain
+                ? "bg-emerald-500/10 border-emerald-500/30"
+                : "bg-gray-500/10 border-gray-500/30"
+            }`}>
+              <div className={`w-2 h-2 rounded-full animate-pulse ${
+                isOnChain ? "bg-emerald-400" : "bg-gray-400"
+              }`} />
+              <span className={`text-[10px] font-medium ${
+                isOnChain ? "text-emerald-300" : "text-gray-400"
+              }`}>
+                {isOnChain ? "⛓️ On-Chain" : "Offline"}
+              </span>
             </div>
           </div>
 
@@ -134,9 +148,12 @@ export default function PokerTable() {
                         {(pot / 1e9).toFixed(2)} SOL
                       </span>
                       <span className="text-yellow-600 text-[10px]">
-                        POT
+                        {isOnChain ? "⛓️ ON-CHAIN POT" : "POT"}
                       </span>
                     </div>
+                    {isOnChain && (
+                      <div className="ml-1 w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -201,8 +218,16 @@ export default function PokerTable() {
                     Wins!
                   </h2>
                   <div className="text-yellow-400 font-bold text-xl">
-                    {(pot / 1e9).toFixed(2)} SOL 💰
+                    +{(pot / 1e9).toFixed(2)} SOL 💰
                   </div>
+                  {isOnChain && (
+                    <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 rounded-full border border-emerald-500/30">
+                      <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+                      <span className="text-emerald-300 text-[10px] font-medium">
+                        ⛓️ Settled on Solana L1
+                      </span>
+                    </div>
+                  )}
                   {winnerHandResult && (
                     <div className="text-gray-300 text-sm">
                       {winnerHandResult.rank} — {winnerHandResult.description}

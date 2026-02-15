@@ -261,14 +261,14 @@ export default function GameLobby({
                   {/* Info box */}
                   <div className="mb-5 p-3 bg-blue-500/5 rounded-xl border border-blue-500/20">
                     <div className="flex items-start gap-2">
-                      <span className="text-blue-400 text-sm">🌐</span>
+                      <span className="text-blue-400 text-sm">⛓️</span>
                       <div>
                         <p className="text-blue-300 text-xs font-medium">
-                          Real-time Multiplayer
+                          Real SOL On-Chain Game
                         </p>
                         <p className="text-blue-400/60 text-[11px] mt-0.5">
-                          Create a room and share the code with your friend.
-                          Play from different browsers or devices!
+                          Your buy-in SOL is transferred to the game PDA on Solana.
+                          Winner receives the full pot. All transactions are verifiable on-chain.
                         </p>
                       </div>
                     </div>
@@ -283,7 +283,7 @@ export default function GameLobby({
                       rounded-2xl text-lg hover:from-yellow-400 hover:via-orange-400 hover:to-red-400 transition-all
                       disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-orange-500/20"
                   >
-                    {isConnecting ? "Connecting..." : `Create Room — ${buyIn} SOL Buy-in`}
+                    {isConnecting ? "Creating on Solana..." : `⛓️ Create Room — ${buyIn} SOL Stake`}
                   </motion.button>
                 </>
               ) : (
@@ -392,10 +392,11 @@ export default function GameLobby({
                   <span className="text-purple-400 text-sm">🤖</span>
                   <div>
                     <p className="text-purple-300 text-xs font-medium">
-                      Practice vs AI Opponent
+                      AI Opponent — Real SOL Staked
                     </p>
                     <p className="text-purple-400/60 text-[11px] mt-0.5">
-                      Play against an intelligent AI. Great for practice before multiplayer!
+                      Play against AI with real SOL on-chain. Your buy-in is staked
+                      to the game PDA. Win to earn the pot!
                     </p>
                   </div>
                 </div>
@@ -410,7 +411,7 @@ export default function GameLobby({
                   rounded-2xl text-lg hover:from-purple-400 hover:via-violet-400 hover:to-pink-400 transition-all
                   disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-purple-500/20"
               >
-                Play vs AI — {buyIn} SOL
+                ⛓️ Play vs AI — {buyIn} SOL Stake
               </motion.button>
             </>
           )}

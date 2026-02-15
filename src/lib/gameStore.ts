@@ -56,8 +56,18 @@ export interface BettingPool {
   winningPlayer: 0 | 1 | 2;
 }
 
+// On-chain transaction record for UI display
+export interface GameTransaction {
+  type: string;
+  signature: string;
+  description: string;
+  timestamp: number;
+  solAmount?: number;
+}
+
 export interface GameState {
   gameId: string;
+  onChainGameId: number | null;
   phase: GamePhase;
   mode: GameMode;
   pot: number;
@@ -79,6 +89,15 @@ export interface GameState {
   aiMessage: string;
   chatMessages: { sender: string; message: string; timestamp: number }[];
 
+  // On-chain state
+  isOnChain: boolean;
+  txHistory: GameTransaction[];
+  txPending: boolean;
+  txError: string | null;
+  gamePDA: string | null;
+  walletBalanceBefore: number;
+  walletBalanceAfter: number;
+
   // AI mode
   createGame: (buyIn: number, playerKey: string, playerName: string) => void;
   // Multiplayer (handled by multiplayer.ts, these are local helpers)
@@ -90,6 +109,7 @@ export interface GameState {
   resetGame: () => void;
   setMyPlayerIndex: (index: 0 | 1 | -1) => void;
   setMode: (mode: GameMode) => void;
+  addTransaction: (tx: GameTransaction) => void;
 }
 
 const AI_NAMES = ["SatoshiBot", "CryptoShark", "BlockBluffer", "ChainGambler", "PokerNode", "HashKing", "SolanaAce", "MagicPlayer"];
@@ -135,6 +155,7 @@ function triggerAITurn() {
 
 export const useGameStore = create<GameState>((set, get) => ({
   gameId: "",
+  onChainGameId: null,
   phase: "lobby",
   mode: "ai",
   pot: 0,
@@ -156,7 +177,21 @@ export const useGameStore = create<GameState>((set, get) => ({
   aiMessage: "",
   chatMessages: [],
 
+  // On-chain state
+  isOnChain: false,
+  txHistory: [],
+  txPending: false,
+  txError: null,
+  gamePDA: null,
+  walletBalanceBefore: 0,
+  walletBalanceAfter: 0,
+
   setMode: (mode) => set({ mode }),
+
+  addTransaction: (tx) => {
+    const state = get();
+    set({ txHistory: [...state.txHistory, tx] });
+  },
 
   createGame: (buyIn, playerKey, playerName) => {
     // AI mode: auto-add AI and start
@@ -447,11 +482,13 @@ export const useGameStore = create<GameState>((set, get) => ({
       return;
     }
     set({
-      gameId: "", phase: "lobby", mode: "ai", pot: 0, buyIn: 0, currentBet: 0, dealer: 0, turn: 0,
+      gameId: "", onChainGameId: null, phase: "lobby", mode: "ai", pot: 0, buyIn: 0, currentBet: 0, dealer: 0, turn: 0,
       communityCards: [], deck: [], player1: null, player2: null, myPlayerIndex: -1,
       bettingPool: { totalPoolPlayer1: 0, totalPoolPlayer2: 0, bets: [], isSettled: false, winningPlayer: 0 },
       winner: null, winnerHandResult: null, isAnimating: false, showCards: false,
       lastAction: "", aiMessage: "", chatMessages: [],
+      isOnChain: false, txHistory: [], txPending: false, txError: null, gamePDA: null,
+      walletBalanceBefore: 0, walletBalanceAfter: 0,
     });
   },
 

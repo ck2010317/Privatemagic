@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import { Player } from "@/lib/gameStore";
 import { CardHand } from "./PlayingCard";
-import { shortenPubkey } from "@/lib/solana";
+import { shortenPubkey, lamportsToSol } from "@/lib/solana";
 
 interface PlayerSeatProps {
   player: Player | null;
@@ -100,9 +100,14 @@ export default function PlayerSeat({
               </motion.span>
             )}
           </div>
-          <span className="text-gray-400 text-xs">
-            {shortenPubkey(player.publicKey)}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-gray-400 text-xs">
+              {shortenPubkey(player.publicKey)}
+            </span>
+            <span className="text-yellow-400 text-xs font-bold">
+              {lamportsToSol(player.balance).toFixed(3)} SOL
+            </span>
+          </div>
         </div>
 
         {/* Current Bet */}

@@ -1,27 +1,92 @@
 "use client";
 
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import WalletMultiButton from "@/components/WalletButton";
 import { motion } from "framer-motion";
 import { useGameStore } from "@/lib/gameStore";
-import { solToLamports } from "@/lib/solana";
+import { solToLamports, lamportsToSol } from "@/lib/solana";
 import { createMultiplayerGame, joinMultiplayerGame, disconnect } from "@/lib/multiplayer";
+import {
+  createOnChainGame,
+  joinOnChainGame,
+  playerActionOnChain,
+  advancePhaseOnChain,
+  revealWinnerOnChain,
+  fetchGameState,
+  getWalletBalance,
+  getExplorerUrl,
+  getGameExplorerUrl,
+  WalletAdapter,
+} from "@/lib/onChainGame";
 
 import Navbar from "@/components/Navbar";
 import GameLobby from "@/components/GameLobby";
 import PokerTable from "@/components/PokerTable";
 import BettingPanel from "@/components/BettingPanel";
 import GameInfo from "@/components/GameInfo";
+import TransactionFeed from "@/components/TransactionFeed";
 
 export default function Home() {
-  const { publicKey, connected } = useWallet();
-  const { phase, mode, createGame, resetGame } = useGameStore();
+  const { publicKey, connected, signTransaction, signAllTransactions } = useWallet();
+  const { connection } = useConnection();
+  const { phase, mode, createGame, resetGame, isOnChain, txHistory, txPending, txError, onChainGameId, gamePDA } = useGameStore();
 
+  // Create wallet adapter for on-chain calls
+  const getWalletAdapter = (): WalletAdapter | null => {
+    if (!publicKey || !signTransaction || !signAllTransactions) return null;
+    return { publicKey, signTransaction, signAllTransactions };
+  };
 
-  const handleCreateGame = (buyIn: number, name: string) => {
+  const handleCreateGame = async (buyIn: number, name: string) => {
     if (!publicKey) return;
-    const lamports = solToLamports(buyIn);
-    createGame(lamports, publicKey.toBase58(), name);
+
+    const wallet = getWalletAdapter();
+    if (!wallet) return;
+
+    // Set pending state
+    useGameStore.setState({ txPending: true, txError: null, lastAction: "Creating game on Solana..." });
+
+    try {
+      // Get wallet balance before
+      const balBefore = await getWalletBalance(publicKey);
+      useGameStore.setState({ walletBalanceBefore: balBefore });
+
+      // Create game on-chain (transfers real SOL)
+      const result = await createOnChainGame(wallet, buyIn);
+      if (!result) {
+        useGameStore.setState({ txPending: false, txError: "Failed to create on-chain game" });
+        return;
+      }
+
+      // Add tx to history
+      useGameStore.getState().addTransaction({
+        type: "create",
+        signature: result.txSignature,
+        description: `Game created — ${buyIn} SOL staked`,
+        timestamp: Date.now(),
+        solAmount: solToLamports(buyIn),
+      });
+
+      // Now also start the local AI game for gameplay
+      const lamports = solToLamports(buyIn);
+      createGame(lamports, publicKey.toBase58(), name);
+
+      // Update on-chain state
+      useGameStore.setState({
+        isOnChain: true,
+        onChainGameId: result.gameId,
+        gamePDA: result.gamePDA,
+        txPending: false,
+        lastAction: `Game created on Solana! 🎮 ${buyIn} SOL staked`,
+      });
+
+    } catch (err: any) {
+      console.error("Create game error:", err);
+      useGameStore.setState({ txPending: false, txError: err.message });
+      // Fallback to offline mode
+      const lamports = solToLamports(buyIn);
+      createGame(lamports, publicKey.toBase58(), name);
+    }
   };
 
   const handleJoinGame = (name: string) => {
@@ -30,9 +95,52 @@ export default function Home() {
 
   const handleCreateMultiplayer = async (buyIn: number, name: string) => {
     if (!publicKey) return;
-    const lamports = solToLamports(buyIn);
-    useGameStore.setState({ mode: "multiplayer" });
-    await createMultiplayerGame(lamports, publicKey.toBase58(), name);
+
+    const wallet = getWalletAdapter();
+    if (!wallet) return;
+
+    useGameStore.setState({ txPending: true, txError: null, lastAction: "Creating on-chain game..." });
+
+    try {
+      // Get wallet balance before
+      const balBefore = await getWalletBalance(publicKey);
+      useGameStore.setState({ walletBalanceBefore: balBefore });
+
+      // Create game on-chain first (real SOL transfer)
+      const result = await createOnChainGame(wallet, buyIn);
+      if (!result) {
+        useGameStore.setState({ txPending: false, txError: "Failed to create on-chain game" });
+        return;
+      }
+
+      useGameStore.getState().addTransaction({
+        type: "create",
+        signature: result.txSignature,
+        description: `Game created — ${buyIn} SOL staked on-chain`,
+        timestamp: Date.now(),
+        solAmount: solToLamports(buyIn),
+      });
+
+      useGameStore.setState({
+        isOnChain: true,
+        onChainGameId: result.gameId,
+        gamePDA: result.gamePDA,
+        txPending: false,
+      });
+
+      // Then set up multiplayer WebSocket
+      const lamports = solToLamports(buyIn);
+      useGameStore.setState({ mode: "multiplayer" });
+      await createMultiplayerGame(lamports, publicKey.toBase58(), name);
+
+    } catch (err: any) {
+      console.error("Create multiplayer error:", err);
+      useGameStore.setState({ txPending: false, txError: err.message });
+      // Fallback
+      const lamports = solToLamports(buyIn);
+      useGameStore.setState({ mode: "multiplayer" });
+      await createMultiplayerGame(lamports, publicKey.toBase58(), name);
+    }
   };
 
   const handleJoinMultiplayer = async (roomCode: string, name: string) => {
@@ -47,7 +155,7 @@ export default function Home() {
 
   const handleNewGame = () => {
     if (mode === "multiplayer") {
-      resetGame(); // triggers rematch request via WS
+      resetGame();
     } else {
       resetGame();
     }
@@ -58,11 +166,13 @@ export default function Home() {
       disconnect();
     }
     useGameStore.setState({
-      gameId: "", phase: "lobby", mode: "ai", pot: 0, buyIn: 0, currentBet: 0, dealer: 0, turn: 0,
+      gameId: "", onChainGameId: null, phase: "lobby", mode: "ai", pot: 0, buyIn: 0, currentBet: 0, dealer: 0, turn: 0,
       communityCards: [], deck: [], player1: null, player2: null, myPlayerIndex: -1,
       bettingPool: { totalPoolPlayer1: 0, totalPoolPlayer2: 0, bets: [], isSettled: false, winningPlayer: 0 },
       winner: null, winnerHandResult: null, isAnimating: false, showCards: false,
       lastAction: "", aiMessage: "", chatMessages: [],
+      isOnChain: false, txHistory: [], txPending: false, txError: null, gamePDA: null,
+      walletBalanceBefore: 0, walletBalanceAfter: 0,
     });
   };
 
@@ -178,9 +288,10 @@ export default function Home() {
           />
         ) : (
           <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-[280px_1fr_300px] gap-6 items-start">
-            {/* Left Panel — Game Info */}
-            <div className="hidden lg:block">
+            {/* Left Panel — Game Info + Transactions */}
+            <div className="hidden lg:block space-y-4">
               <GameInfo />
+              <TransactionFeed />
             </div>
 
             {/* Center — Poker Table */}
@@ -229,7 +340,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="fixed bottom-0 left-0 right-0 py-2 text-center pointer-events-none z-0">
         <div className="text-gray-600 text-[10px]">
-          Private Poker • Program: ErDUq4v...qybq • MagicBlock Ephemeral Rollup • Intel TDX TEE • Solana Devnet
+          Private Poker • Program: ErDUq4v...qybq • {isOnChain ? `⛓️ Game #${onChainGameId} On-Chain` : "MagicBlock Ephemeral Rollup"} • Solana Devnet
         </div>
       </footer>
     </div>
