@@ -1,6 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
+import { PublicKey } from "@solana/web3.js";
 import WalletMultiButton from "@/components/WalletButton";
 import { motion } from "framer-motion";
 import { useGameStore } from "@/lib/gameStore";
@@ -160,6 +162,48 @@ export default function Home() {
       resetGame();
     }
   };
+
+  // Handle on-chain settlement when game is settled
+  useEffect(() => {
+    if (phase === "settled" && isOnChain && publicKey && onChainGameId) {
+      const wallet = getWalletAdapter();
+      if (!wallet) return;
+
+      // Get winner from game state
+      const gameState = useGameStore.getState();
+      const winner = gameState.winner;
+      const player1 = gameState.player1;
+      const player2 = gameState.player2;
+
+      if (!winner || !player1 || !player2) return;
+
+      // Determine winner index (0 = player1, 1 = player2)
+      const winnerIndex = winner === player1.id ? 0 : 1;
+
+      // Call settle function ONLY ONCE
+      const settledOnChain = (gameState as any).settledOnChain;
+      if (settledOnChain) return;
+
+      console.log("🏆 Settling on-chain with winner index:", winnerIndex);
+      revealWinnerOnChain(wallet, onChainGameId, winnerIndex, new PublicKey(player1.publicKey), new PublicKey(player2.publicKey))
+        .then((result) => {
+          if (result.success) {
+            console.log("✅ On-chain settlement completed:", result.signature);
+            useGameStore.getState().addTransaction({
+              type: "settle",
+              signature: result.signature!,
+              description: `Winner settled on-chain`,
+              timestamp: Date.now(),
+              solAmount: 0,
+            });
+            // Mark as settled on-chain to prevent duplicate calls
+            useGameStore.setState({ settledOnChain: true } as any);
+          } else {
+            console.error("❌ On-chain settlement failed:", result.error);
+          }
+        });
+    }
+  }, [phase, isOnChain, publicKey, onChainGameId]);
 
   const handleBackToLobby = () => {
     if (mode === "multiplayer") {

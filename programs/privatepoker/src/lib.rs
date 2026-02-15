@@ -1,7 +1,6 @@
 use anchor_lang::prelude::*;
-use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
+use ephemeral_rollups_sdk::anchor::{delegate, ephemeral};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
-use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
 declare_id!("ErDUq4vQDtAWzmksTD4vxoh3AQFijNFVYLTxJCQaqybq");
 
@@ -225,17 +224,15 @@ pub mod privatepoker {
         Ok(())
     }
 
-    /// 6️⃣ Reveal winner and settle the pot (commits state back to Solana L1)
+    /// 6️⃣ Reveal winner and settle the pot
     pub fn reveal_winner(ctx: Context<RevealWinner>, winner_index: u8) -> Result<()> {
         let game = &mut ctx.accounts.game;
         let _player1_hand = &ctx.accounts.player1_hand;
         let _player2_hand = &ctx.accounts.player2_hand;
-        let magic_program = &ctx.accounts.magic_program.to_account_info();
-        let magic_context = &ctx.accounts.magic_context.to_account_info();
 
         require!(game.phase == GamePhase::Showdown, GameError::InvalidPhase);
 
-        // Determine winner (0 = player1, 1 = player2, 2 = tie)
+        // Determine winner
         match winner_index {
             0 => {
                 game.winner = GameResult::Winner(game.player1.unwrap());
@@ -250,14 +247,24 @@ pub mod privatepoker {
 
         game.phase = GamePhase::Settled;
 
-        // Commit game state back to Solana L1 and undelegate from ER
-        game.exit(&crate::ID)?;
-        commit_and_undelegate_accounts(
-            &ctx.accounts.payer,
-            vec![&game.to_account_info()],
-            magic_context,
-            magic_program,
-        )?;
+        // Transfer pot from game PDA to winner
+        if game.pot > 0 {
+            let pot_to_transfer = game.pot;
+            
+            // Transfer SOL from payer to winner account
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.payer.to_account_info(),
+                        to: ctx.accounts.winner.to_account_info(),
+                    },
+                ),
+                pot_to_transfer,
+            )?;
+            
+            game.pot = 0;
+        }
 
         msg!("Winner revealed for game {}: {:?}", game.game_id, game.winner);
         Ok(())
@@ -544,7 +551,6 @@ pub struct AdvancePhase<'info> {
     pub payer: Signer<'info>,
 }
 
-#[commit]
 #[derive(Accounts)]
 pub struct RevealWinner<'info> {
     #[account(mut, seeds = [GAME_SEED, &game.game_id.to_le_bytes()], bump)]
@@ -566,6 +572,12 @@ pub struct RevealWinner<'info> {
 
     #[account(mut)]
     pub payer: Signer<'info>,
+
+    /// CHECK: Winner account to receive pot payout
+    #[account(mut)]
+    pub winner: AccountInfo<'info>,
+
+    pub system_program: Program<'info, System>,
 }
 
 // Betting Pool Accounts

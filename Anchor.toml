@@ -1,7 +1,10 @@
 [toolchain]
 
+[build]
+sh = ["bash", "-c"]
+
 [features]
-seeds = false
+resolution = true
 skip-lint = false
 
 [programs.devnet]

@@ -97,6 +97,7 @@ export interface GameState {
   gamePDA: string | null;
   walletBalanceBefore: number;
   walletBalanceAfter: number;
+  settledOnChain?: boolean;
 
   // AI mode
   createGame: (buyIn: number, playerKey: string, playerName: string) => void;
@@ -488,7 +489,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       winner: null, winnerHandResult: null, isAnimating: false, showCards: false,
       lastAction: "", aiMessage: "", chatMessages: [],
       isOnChain: false, txHistory: [], txPending: false, txError: null, gamePDA: null,
-      walletBalanceBefore: 0, walletBalanceAfter: 0,
+      walletBalanceBefore: 0, walletBalanceAfter: 0, settledOnChain: false,
     });
   },
 

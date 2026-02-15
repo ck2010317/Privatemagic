@@ -356,7 +356,10 @@ export async function revealWinnerOnChain(
     const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
     const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
 
-    console.log("🏆 Revealing winner on-chain...", { winnerIndex });
+    // Determine winner pubkey for payout
+    const winnerPubkey = winnerIndex === 0 ? player1Pubkey : (winnerIndex === 1 ? player2Pubkey : wallet.publicKey);
+
+    console.log("🏆 Revealing winner on-chain...", { winnerIndex, winnerPubkey: winnerPubkey.toString() });
 
     const tx = await program.methods
       .revealWinner(winnerIndex)
@@ -365,6 +368,8 @@ export async function revealWinnerOnChain(
         player1Hand: hand1PDA,
         player2Hand: hand2PDA,
         payer: wallet.publicKey,
+        winner: winnerPubkey,
+        systemProgram: new PublicKey("11111111111111111111111111111111"),
       })
       .rpc();
 
