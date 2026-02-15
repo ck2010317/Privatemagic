@@ -5,7 +5,7 @@
  * Uses MagicBlock Ephemeral Rollups for real-time gameplay in TEE,
  * with settlement back to Solana L1.
  *
- * Program ID: ErDUq4vQDtAWzmksTD4vxoh3AQFijNFVYLTxJCQaqybq
+ * Program ID: 5c9wR99j8ouv3dyDXxnUEvijM2TGzg8VLHU15RTqwWFD
  */
 
 import { Connection, PublicKey, SystemProgram, Transaction, TransactionInstruction } from "@solana/web3.js";

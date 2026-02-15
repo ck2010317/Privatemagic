@@ -11,9 +11,11 @@ import { createMultiplayerGame, joinMultiplayerGame, disconnect } from "@/lib/mu
 import {
   createOnChainGame,
   joinOnChainGame,
+  delegateToMagicBlock,
   playerActionOnChain,
   advancePhaseOnChain,
   revealWinnerOnChain,
+  settlePotOnChain,
   fetchGameState,
   getWalletBalance,
   getExplorerUrl,
@@ -384,7 +386,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="fixed bottom-0 left-0 right-0 py-2 text-center pointer-events-none z-0">
         <div className="text-gray-600 text-[10px]">
-          Private Poker • Program: ErDUq4v...qybq • {isOnChain ? `⛓️ Game #${onChainGameId} On-Chain` : "MagicBlock Ephemeral Rollup"} • Solana Devnet
+          Private Poker • Program: 5c9wR99...XB7v6Qi • {isOnChain ? `⛓️ Game #${onChainGameId} On-Chain` : "MagicBlock Ephemeral Rollup"} • Solana Devnet
         </div>
       </footer>
     </div>

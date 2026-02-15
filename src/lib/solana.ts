@@ -2,14 +2,14 @@ import { Connection, PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } f
 import * as nacl from "tweetnacl";
 
 // MagicBlock Constants
-export const TEE_URL = "https://tee.magicblock.app";
-export const TEE_WS_URL = "wss://tee.magicblock.app";
-export const ER_VALIDATOR = new PublicKey("FnE6VJT5QNZdedZPnCoLsARgBwoE6DeJNjBs2H1gySXA");
+export const TEE_URL = "https://devnet-us.magicblock.app";
+export const TEE_WS_URL = "wss://devnet-us.magicblock.app";
+export const ER_VALIDATOR = new PublicKey("MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd");
 export const PERMISSION_PROGRAM_ID = new PublicKey("ACLseoPoyC3cBqoUtkbjZ4aDrkurZW86v19pXz2XQnp1");
 export const DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
 // Program ID (deployed on devnet)
-export const PROGRAM_ID = new PublicKey("ErDUq4vQDtAWzmksTD4vxoh3AQFijNFVYLTxJCQaqybq");
+export const PROGRAM_ID = new PublicKey("5c9wR99j8ouv3dyDXxnUEvijM2TGzg8VLHU15RTqwWFD");
 
 // Seeds
 export const GAME_SEED = Buffer.from("poker_game");

@@ -1,18 +1,19 @@
 /**
- * On-Chain Game Manager
+ * On-Chain Game Manager with MagicBlock Ephemeral Rollups
  *
- * Wires every game action to the Solana program.
- * Real SOL is staked, cards are processed in MagicBlock TEE,
- * and the winner receives the pot on-chain.
+ * Uses MagicBlock's Delegation + Ephemeral Rollup architecture:
+ * - Base layer (Solana devnet): Create, Join, Delegate, Settle
+ * - Ephemeral Rollup (MagicBlock ER): Deal, Actions, Phases, Reveal Winner
  *
  * Flow:
- *   1. Create game → create_game (SOL transferred to game PDA)
- *   2. Join game → join_game (SOL transferred to game PDA)
- *   3. Delegate → delegate_pda to MagicBlock TEE
- *   4. Deal cards → deal_cards (in TEE)
- *   5. Player actions → player_action (check/call/raise/fold/allin)
- *   6. Phase advances → advance_phase
- *   7. Reveal winner → reveal_winner (commits to L1, SOL settled)
+ *   1. Create game → Solana L1 (SOL transferred to game PDA)
+ *   2. Join game → Solana L1 (SOL transferred to game PDA)
+ *   3. Delegate → Solana L1 (delegates game+hand PDAs to ER validator)
+ *   4. Deal cards → MagicBlock ER (fast, gasless)
+ *   5. Player actions → MagicBlock ER (fast, gasless)
+ *   6. Phase advances → MagicBlock ER (fast, gasless)
+ *   7. Reveal winner → MagicBlock ER (commits+undelegates back to L1)
+ *   8. Settle pot → Solana L1 (transfers SOL to winner)
  */
 
 import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, SystemProgram } from "@solana/web3.js";
@@ -20,6 +21,8 @@ import { Program, AnchorProvider, BN, Idl } from "@coral-xyz/anchor";
 import {
   PROGRAM_ID,
   DEVNET_RPC,
+  TEE_URL,
+  ER_VALIDATOR,
   getGamePDA,
   getPlayerHandPDA,
   getBettingPoolPDA,
@@ -65,7 +68,11 @@ export interface WalletAdapter {
 
 // =================== CONNECTION ===================
 
+// Base layer connection (Solana devnet) - for create, join, delegate, settle
 const connection = new Connection(DEVNET_RPC, "confirmed");
+
+// MagicBlock ER connection - for gameplay (deal, actions, phases, reveal)
+const erConnection = new Connection(TEE_URL, "confirmed");
 
 function getProvider(wallet: WalletAdapter): AnchorProvider {
   return new AnchorProvider(connection, wallet as any, {
@@ -74,8 +81,20 @@ function getProvider(wallet: WalletAdapter): AnchorProvider {
   });
 }
 
+function getERProvider(wallet: WalletAdapter): AnchorProvider {
+  return new AnchorProvider(erConnection, wallet as any, {
+    commitment: "confirmed",
+    preflightCommitment: "confirmed",
+  });
+}
+
 function getProgram(wallet: WalletAdapter): Program {
   const provider = getProvider(wallet);
+  return new Program(IDL as Idl, provider);
+}
+
+function getERProgram(wallet: WalletAdapter): Program {
+  const provider = getERProvider(wallet);
   return new Program(IDL as Idl, provider);
 }
 
@@ -198,7 +217,81 @@ export async function joinOnChainGame(
 }
 
 /**
- * Deal cards on-chain (should be called by the dealer/TEE)
+ * Delegate game and player hand PDAs to MagicBlock ER validator.
+ * This runs on Solana base layer and transfers PDA ownership to the delegation program.
+ * After delegation, gameplay transactions go to the ER RPC for fast, gasless execution.
+ */
+export async function delegateToMagicBlock(
+  wallet: WalletAdapter,
+  gameId: number,
+  player1Pubkey: PublicKey,
+  player2Pubkey: PublicKey
+): Promise<TransactionResult> {
+  try {
+    const program = getProgram(wallet); // Base layer program
+    const gameIdBN = new BN(gameId);
+    const [gamePDA] = getGamePDA(BigInt(gameId));
+    const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
+    const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
+
+    console.log("🔮 Delegating game PDA to MagicBlock ER...");
+
+    // 1. Delegate game PDA
+    const tx1 = await program.methods
+      .delegatePda({ game: { gameId: gameIdBN } })
+      .accounts({
+        pda: gamePDA,
+        payer: wallet.publicKey,
+      })
+      .remainingAccounts([
+        { pubkey: ER_VALIDATOR, isWritable: false, isSigner: false },
+      ])
+      .rpc();
+
+    console.log("✅ Game PDA delegated to ER:", tx1);
+
+    // 2. Delegate player 1 hand PDA
+    const tx2 = await program.methods
+      .delegatePda({ playerHand: { gameId: gameIdBN, player: player1Pubkey } })
+      .accounts({
+        pda: hand1PDA,
+        payer: wallet.publicKey,
+      })
+      .remainingAccounts([
+        { pubkey: ER_VALIDATOR, isWritable: false, isSigner: false },
+      ])
+      .rpc();
+
+    console.log("✅ Player 1 hand delegated to ER:", tx2);
+
+    // 3. Delegate player 2 hand PDA
+    const tx3 = await program.methods
+      .delegatePda({ playerHand: { gameId: gameIdBN, player: player2Pubkey } })
+      .accounts({
+        pda: hand2PDA,
+        payer: wallet.publicKey,
+      })
+      .remainingAccounts([
+        { pubkey: ER_VALIDATOR, isWritable: false, isSigner: false },
+      ])
+      .rpc();
+
+    console.log("✅ Player 2 hand delegated to ER:", tx3);
+
+    if (currentGameState) {
+      currentGameState.isDelegated = true;
+      currentGameState.txSignatures.push(tx1, tx2, tx3);
+    }
+
+    return { success: true, signature: tx1 };
+  } catch (err: any) {
+    console.error("❌ Failed to delegate to MagicBlock:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Deal cards on MagicBlock ER (fast, gasless)
  */
 export async function dealCardsOnChain(
   wallet: WalletAdapter,
@@ -339,9 +432,9 @@ export async function advancePhaseOnChain(
 }
 
 /**
- * Reveal winner and settle the pot on-chain.
- * This commits the state back to Solana L1 and undelegates from ER.
- * The winner receives the pot SOL.
+ * Reveal winner on MagicBlock ER.
+ * This commits the game state back to Solana L1 and undelegates from ER.
+ * After undelegation, call settlePotOnChain to transfer SOL to winner.
  */
 export async function revealWinnerOnChain(
   wallet: WalletAdapter,
@@ -351,38 +444,110 @@ export async function revealWinnerOnChain(
   player2Pubkey: PublicKey
 ): Promise<TransactionResult> {
   try {
-    const program = getProgram(wallet);
+    // Use ER program for reveal_winner (runs on MagicBlock ER with commit+undelegate)
+    const erProgram = getERProgram(wallet);
     const [gamePDA] = getGamePDA(BigInt(gameId));
     const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
     const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
 
-    // Determine winner pubkey for payout
     const winnerPubkey = winnerIndex === 0 ? player1Pubkey : (winnerIndex === 1 ? player2Pubkey : wallet.publicKey);
 
-    console.log("🏆 Revealing winner on-chain...", { winnerIndex, winnerPubkey: winnerPubkey.toString() });
+    console.log("🏆 Revealing winner on MagicBlock ER (commit+undelegate to L1)...", {
+      winnerIndex,
+      winnerPubkey: winnerPubkey.toString(),
+    });
 
-    const tx = await program.methods
+    const tx = await erProgram.methods
       .revealWinner(winnerIndex)
       .accounts({
         game: gamePDA,
         player1Hand: hand1PDA,
         player2Hand: hand2PDA,
         payer: wallet.publicKey,
-        winner: winnerPubkey,
-        systemProgram: new PublicKey("11111111111111111111111111111111"),
       })
       .rpc();
 
-    console.log("✅ Winner revealed & pot settled on-chain! TX:", tx);
+    console.log("✅ Winner revealed on ER & committed to L1! TX:", tx);
+
+    // Now settle pot on base layer (after undelegation)
+    console.log("⏳ Waiting for undelegation to complete...");
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for undelegation
+
+    const settleTx = await settlePotOnChain(wallet, gameId, winnerPubkey);
+    if (settleTx.success) {
+      console.log("✅ Pot settled on L1! TX:", settleTx.signature);
+    }
 
     if (currentGameState) {
       currentGameState.txSignatures.push(tx);
+      if (settleTx.signature) currentGameState.txSignatures.push(settleTx.signature);
       currentGameState.phase = "settled";
     }
 
     return { success: true, signature: tx };
   } catch (err: any) {
-    console.error("❌ Failed to reveal winner:", err);
+    console.error("❌ Failed to reveal winner on ER:", err);
+    // Fallback: try on base layer directly (if not delegated)
+    try {
+      console.log("🔄 Fallback: revealing winner on base layer...");
+      const program = getProgram(wallet);
+      const [gamePDA] = getGamePDA(BigInt(gameId));
+      const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
+      const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
+      const winnerPubkey = winnerIndex === 0 ? player1Pubkey : (winnerIndex === 1 ? player2Pubkey : wallet.publicKey);
+
+      // On base layer, call settle_pot directly (no commit needed)
+      const settleTx = await program.methods
+        .settlePot()
+        .accounts({
+          game: gamePDA,
+          winner: winnerPubkey,
+          payer: wallet.publicKey,
+        })
+        .rpc();
+
+      console.log("✅ Pot settled on base layer! TX:", settleTx);
+      return { success: true, signature: settleTx };
+    } catch (fallbackErr: any) {
+      console.error("❌ Fallback also failed:", fallbackErr);
+      return { success: false, error: err.message };
+    }
+  }
+}
+
+/**
+ * Settle pot on Solana base layer (after undelegation from ER).
+ * Transfers SOL from game PDA to the winner.
+ */
+export async function settlePotOnChain(
+  wallet: WalletAdapter,
+  gameId: number,
+  winnerPubkey: PublicKey
+): Promise<TransactionResult> {
+  try {
+    const program = getProgram(wallet); // Base layer
+    const [gamePDA] = getGamePDA(BigInt(gameId));
+
+    console.log("💰 Settling pot on Solana L1...", { winner: winnerPubkey.toString() });
+
+    const tx = await program.methods
+      .settlePot()
+      .accounts({
+        game: gamePDA,
+        winner: winnerPubkey,
+        payer: wallet.publicKey,
+      })
+      .rpc();
+
+    console.log("✅ Pot settled! SOL transferred to winner. TX:", tx);
+
+    if (currentGameState) {
+      currentGameState.txSignatures.push(tx);
+    }
+
+    return { success: true, signature: tx };
+  } catch (err: any) {
+    console.error("❌ Failed to settle pot:", err);
     return { success: false, error: err.message };
   }
 }

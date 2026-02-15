@@ -1,8 +1,9 @@
 use anchor_lang::prelude::*;
-use ephemeral_rollups_sdk::anchor::{delegate, ephemeral};
+use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
 use ephemeral_rollups_sdk::cpi::DelegateConfig;
+use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
-declare_id!("ErDUq4vQDtAWzmksTD4vxoh3AQFijNFVYLTxJCQaqybq");
+declare_id!("5c9wR99j8ouv3dyDXxnUEvijM2TGzg8VLHU15RTqwWFD");
 
 // Seeds
 pub const GAME_SEED: &[u8] = b"poker_game";
@@ -224,7 +225,8 @@ pub mod privatepoker {
         Ok(())
     }
 
-    /// 6️⃣ Reveal winner and settle the pot
+    /// 6️⃣ Reveal winner and commit state back to Solana L1 via MagicBlock ER
+    /// This instruction runs ON the Ephemeral Rollup and commits game result to base layer
     pub fn reveal_winner(ctx: Context<RevealWinner>, winner_index: u8) -> Result<()> {
         let game = &mut ctx.accounts.game;
         let _player1_hand = &ctx.accounts.player1_hand;
@@ -247,26 +249,40 @@ pub mod privatepoker {
 
         game.phase = GamePhase::Settled;
 
-        // Transfer pot from game PDA to winner
-        if game.pot > 0 {
-            let pot_to_transfer = game.pot;
-            
-            // Transfer SOL from payer to winner account
-            anchor_lang::system_program::transfer(
-                CpiContext::new(
-                    ctx.accounts.system_program.to_account_info(),
-                    anchor_lang::system_program::Transfer {
-                        from: ctx.accounts.payer.to_account_info(),
-                        to: ctx.accounts.winner.to_account_info(),
-                    },
-                ),
-                pot_to_transfer,
-            )?;
-            
-            game.pot = 0;
+        msg!("Winner revealed for game {}: {:?}", game.game_id, game.winner);
+
+        // Serialize and commit+undelegate game state back to Solana L1
+        game.exit(&crate::ID)?;
+        commit_and_undelegate_accounts(
+            &ctx.accounts.payer,
+            vec![
+                &ctx.accounts.game.to_account_info(),
+                &ctx.accounts.player1_hand.to_account_info(),
+                &ctx.accounts.player2_hand.to_account_info(),
+            ],
+            &ctx.accounts.magic_context,
+            &ctx.accounts.magic_program,
+        )?;
+
+        Ok(())
+    }
+
+    /// 6b️⃣ Settle pot on base layer (after undelegation completes)
+    /// Transfers SOL from game PDA to winner on Solana L1
+    pub fn settle_pot(ctx: Context<SettlePot>) -> Result<()> {
+        let game = &ctx.accounts.game;
+
+        require!(game.phase == GamePhase::Settled, GameError::InvalidPhase);
+
+        // Transfer pot from game PDA to winner using lamport manipulation
+        // (PDA-to-account transfer, no CPI needed)
+        let pot = game.pot;
+        if pot > 0 {
+            **ctx.accounts.game.to_account_info().try_borrow_mut_lamports()? -= pot;
+            **ctx.accounts.winner.to_account_info().try_borrow_mut_lamports()? += pot;
         }
 
-        msg!("Winner revealed for game {}: {:?}", game.game_id, game.winner);
+        msg!("Pot of {} lamports settled to winner {}", pot, ctx.accounts.winner.key());
         Ok(())
     }
 
@@ -551,6 +567,10 @@ pub struct AdvancePhase<'info> {
     pub payer: Signer<'info>,
 }
 
+/// RevealWinner runs ON the MagicBlock Ephemeral Rollup
+/// The #[commit] macro injects magic_context and magic_program accounts
+/// which are used to commit+undelegate state back to Solana L1
+#[commit]
 #[derive(Accounts)]
 pub struct RevealWinner<'info> {
     #[account(mut, seeds = [GAME_SEED, &game.game_id.to_le_bytes()], bump)]
@@ -572,12 +592,21 @@ pub struct RevealWinner<'info> {
 
     #[account(mut)]
     pub payer: Signer<'info>,
+}
+
+/// SettlePot runs on Solana base layer AFTER undelegation
+/// Transfers SOL from game PDA to the winner
+#[derive(Accounts)]
+pub struct SettlePot<'info> {
+    #[account(mut, seeds = [GAME_SEED, &game.game_id.to_le_bytes()], bump)]
+    pub game: Account<'info, Game>,
 
     /// CHECK: Winner account to receive pot payout
     #[account(mut)]
     pub winner: AccountInfo<'info>,
 
-    pub system_program: Program<'info, System>,
+    #[account(mut)]
+    pub payer: Signer<'info>,
 }
 
 // Betting Pool Accounts
