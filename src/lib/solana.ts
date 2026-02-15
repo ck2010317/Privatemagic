@@ -21,10 +21,24 @@ export const BET_SEED = Buffer.from("bet");
 export const DEVNET_RPC = "https://devnet.helius-rpc.com/?api-key=f3417b56-61ad-4ba8-b0f9-3695ea859a58";
 export const MAINNET_RPC = "https://api.mainnet-beta.solana.com";
 
+// Helper: convert a bigint (or number) to 8-byte little-endian Uint8Array
+// Works in both Node.js and browser (no writeBigUInt64LE needed)
+function toLEBytes(value: bigint | number): Buffer {
+  const bn = typeof value === "number" ? BigInt(value) : value;
+  const bytes = new Uint8Array(8);
+  let v = bn;
+  const mask = BigInt(0xff);
+  const shift = BigInt(8);
+  for (let i = 0; i < 8; i++) {
+    bytes[i] = Number(v & mask);
+    v >>= shift;
+  }
+  return Buffer.from(bytes);
+}
+
 // Derive PDAs
 export function getGamePDA(gameId: bigint): [PublicKey, number] {
-  const buffer = Buffer.alloc(8);
-  buffer.writeBigUInt64LE(gameId);
+  const buffer = toLEBytes(gameId);
   return PublicKey.findProgramAddressSync(
     [GAME_SEED, buffer],
     PROGRAM_ID
@@ -32,8 +46,7 @@ export function getGamePDA(gameId: bigint): [PublicKey, number] {
 }
 
 export function getPlayerHandPDA(gameId: bigint, player: PublicKey): [PublicKey, number] {
-  const buffer = Buffer.alloc(8);
-  buffer.writeBigUInt64LE(gameId);
+  const buffer = toLEBytes(gameId);
   return PublicKey.findProgramAddressSync(
     [PLAYER_HAND_SEED, buffer, player.toBuffer()],
     PROGRAM_ID
@@ -41,8 +54,7 @@ export function getPlayerHandPDA(gameId: bigint, player: PublicKey): [PublicKey,
 }
 
 export function getBettingPoolPDA(gameId: bigint): [PublicKey, number] {
-  const buffer = Buffer.alloc(8);
-  buffer.writeBigUInt64LE(gameId);
+  const buffer = toLEBytes(gameId);
   return PublicKey.findProgramAddressSync(
     [BETTING_POOL_SEED, buffer],
     PROGRAM_ID
@@ -50,8 +62,7 @@ export function getBettingPoolPDA(gameId: bigint): [PublicKey, number] {
 }
 
 export function getBetPDA(gameId: bigint, bettor: PublicKey): [PublicKey, number] {
-  const buffer = Buffer.alloc(8);
-  buffer.writeBigUInt64LE(gameId);
+  const buffer = toLEBytes(gameId);
   return PublicKey.findProgramAddressSync(
     [BET_SEED, buffer, bettor.toBuffer()],
     PROGRAM_ID
