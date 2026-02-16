@@ -9,7 +9,7 @@ export const PERMISSION_PROGRAM_ID = new PublicKey("ACLseoPoyC3cBqoUtkbjZ4aDrkur
 export const DELEGATION_PROGRAM_ID = new PublicKey("DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh");
 
 // Program ID (deployed on devnet)
-export const PROGRAM_ID = new PublicKey("5c9wR99j8ouv3dyDXxnUEvijM2TGzg8VLHU15RTqwWFD");
+export const PROGRAM_ID = new PublicKey("7qRu72wJ5AGcXkqnwXoNtkWt3Z6ZaJoyTQsEc5gzzkqK");
 
 // Seeds
 export const GAME_SEED = Buffer.from("poker_game");

@@ -1,9 +1,9 @@
 use anchor_lang::prelude::*;
-use ephemeral_rollups_sdk::anchor::{commit, delegate, ephemeral};
-use ephemeral_rollups_sdk::cpi::DelegateConfig;
+use ephemeral_rollups_sdk::anchor::{commit, delegate, MagicProgram};
+use ephemeral_rollups_sdk::cpi::{DelegateConfig, undelegate_account};
 use ephemeral_rollups_sdk::ephem::commit_and_undelegate_accounts;
 
-declare_id!("5c9wR99j8ouv3dyDXxnUEvijM2TGzg8VLHU15RTqwWFD");
+declare_id!("7qRu72wJ5AGcXkqnwXoNtkWt3Z6ZaJoyTQsEc5gzzkqK");
 
 // Seeds
 pub const GAME_SEED: &[u8] = b"poker_game";
@@ -16,10 +16,27 @@ pub const MAX_COMMUNITY_CARDS: usize = 5;
 pub const MAX_HAND_CARDS: usize = 2;
 pub const DECK_SIZE: usize = 52;
 
-#[ephemeral]
 #[program]
 pub mod privatepoker {
     use super::*;
+    use ephemeral_rollups_sdk::cpi::undelegate_account;
+
+    /// Undelegation callback - called by ER when accounts are undelegated back to L1
+    pub fn process_undelegation(ctx: Context<InitializeAfterUndelegation>, account_seeds: Vec<Vec<u8>>) -> Result<()> {
+        let delegated_account = &ctx.accounts.base_account;
+        let buffer = &ctx.accounts.buffer;
+        let payer = &ctx.accounts.payer;
+        let system_program = &ctx.accounts.system_program;
+        undelegate_account(
+            delegated_account,
+            &crate::ID,
+            buffer,
+            payer,
+            system_program,
+            account_seeds,
+        )?;
+        Ok(())
+    }
 
     /// 1️⃣ Create a new poker game room
     pub fn create_game(ctx: Context<CreateGame>, game_id: u64, buy_in: u64) -> Result<()> {
@@ -857,4 +874,21 @@ pub enum GameError {
     LostBet,
     #[msg("Missing opponent.")]
     MissingOpponent,
+}
+
+// =================== UNDELEGATION CALLBACK ACCOUNTS ===================
+
+#[derive(Accounts)]
+pub struct InitializeAfterUndelegation<'info> {
+    /// CHECK: The delegated account being undelegated
+    #[account(mut)]
+    pub base_account: AccountInfo<'info>,
+    /// CHECK: The buffer account
+    #[account()]
+    pub buffer: AccountInfo<'info>,
+    /// CHECK: The payer
+    #[account(mut)]
+    pub payer: AccountInfo<'info>,
+    /// CHECK: The system program
+    pub system_program: AccountInfo<'info>,
 }

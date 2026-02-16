@@ -1,5 +1,5 @@
 {
-  "address": "5c9wR99j8ouv3dyDXxnUEvijM2TGzg8VLHU15RTqwWFD",
+  "address": "7qRu72wJ5AGcXkqnwXoNtkWt3Z6ZaJoyTQsEc5gzzkqK",
   "metadata": {
     "name": "privatepoker",
     "version": "0.1.0",
@@ -493,38 +493,38 @@
             "program": {
               "kind": "const",
               "value": [
-                68,
-                112,
-                46,
-                183,
-                170,
-                53,
-                214,
-                33,
-                64,
-                239,
-                188,
-                55,
-                130,
-                113,
-                149,
-                138,
-                247,
-                22,
-                136,
-                242,
-                137,
-                255,
-                27,
-                50,
+                101,
+                142,
+                39,
+                45,
+                201,
+                228,
+                4,
+                71,
                 13,
-                178,
-                131,
-                246,
-                232,
-                233,
-                223,
-                252
+                179,
+                237,
+                60,
+                134,
+                33,
+                80,
+                117,
+                238,
+                62,
+                100,
+                195,
+                48,
+                87,
+                174,
+                74,
+                34,
+                2,
+                61,
+                4,
+                42,
+                236,
+                92,
+                86
               ]
             }
           }
@@ -615,7 +615,7 @@
         },
         {
           "name": "owner_program",
-          "address": "5c9wR99j8ouv3dyDXxnUEvijM2TGzg8VLHU15RTqwWFD"
+          "address": "7qRu72wJ5AGcXkqnwXoNtkWt3Z6ZaJoyTQsEc5gzzkqK"
         },
         {
           "name": "delegation_program",
@@ -921,6 +921,9 @@
     },
     {
       "name": "process_undelegation",
+      "docs": [
+        "Undelegation callback - called by ER when accounts are undelegated back to L1"
+      ],
       "discriminator": [
         196,
         28,
