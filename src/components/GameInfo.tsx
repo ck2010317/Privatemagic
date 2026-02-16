@@ -5,7 +5,7 @@ import { useGameStore } from "@/lib/gameStore";
 import { lamportsToSol } from "@/lib/solana";
 
 export default function GameInfo() {
-  const { phase, pot, buyIn, player1, player2, bettingPool, isOnChain, onChainGameId, gamePDA, txHistory } = useGameStore();
+  const { phase, pot, buyIn, player1, player2, bettingPool, isOnChain, isDelegated, onChainGameId, gamePDA, txHistory } = useGameStore();
 
   if (phase === "lobby") return null;
 
@@ -25,12 +25,18 @@ export default function GameInfo() {
       <div className="space-y-3">
         {/* On-Chain Status */}
         {isOnChain && (
-          <div className="flex items-center justify-between p-3 bg-emerald-500/10 rounded-xl border border-emerald-500/20">
+          <div className={`flex items-center justify-between p-3 rounded-xl border ${
+            isDelegated 
+              ? "bg-purple-500/10 border-purple-500/20" 
+              : "bg-emerald-500/10 border-emerald-500/20"
+          }`}>
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-              <span className="text-emerald-400 text-sm font-bold">⛓️ On-Chain</span>
+              <div className={`w-2 h-2 rounded-full animate-pulse ${isDelegated ? "bg-purple-400" : "bg-emerald-400"}`} />
+              <span className={`text-sm font-bold ${isDelegated ? "text-purple-400" : "text-emerald-400"}`}>
+                {isDelegated ? "⚡ MagicBlock ER" : "⛓️ On-Chain"}
+              </span>
             </div>
-            <span className="text-emerald-300 text-xs">{txHistory.length} TXs</span>
+            <span className={`text-xs ${isDelegated ? "text-purple-300" : "text-emerald-300"}`}>{txHistory.length} TXs</span>
           </div>
         )}
 

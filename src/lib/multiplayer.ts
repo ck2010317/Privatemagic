@@ -160,6 +160,11 @@ function handleServerMessage(msg: Record<string, unknown>) {
         stateUpdate.isOnChain = true;
       }
 
+      // Track delegation status from server
+      if (s.isDelegated) {
+        stateUpdate.isDelegated = true;
+      }
+
       useGameStore.setState(stateUpdate);
       break;
     }
@@ -233,6 +238,11 @@ export async function joinMultiplayerGame(roomCode: string, playerKey: string, p
 export function sendAction(action: string, raiseAmount?: number) {
   if (currentMode !== "multiplayer") return;
   sendMsg({ type: "action", action, raiseAmount });
+}
+
+export function sendDelegationComplete() {
+  if (currentMode !== "multiplayer") return;
+  sendMsg({ type: "delegation_complete" });
 }
 
 export function sendBet(publicKey: string, name: string, betOnPlayer: 1 | 2, amount: number) {

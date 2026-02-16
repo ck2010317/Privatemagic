@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useWallet, useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import WalletMultiButton from "@/components/WalletButton";
 import { motion } from "framer-motion";
 import { useGameStore } from "@/lib/gameStore";
 import { solToLamports, lamportsToSol } from "@/lib/solana";
-import { createMultiplayerGame, joinMultiplayerGame, disconnect } from "@/lib/multiplayer";
+import { createMultiplayerGame, joinMultiplayerGame, disconnect, sendDelegationComplete } from "@/lib/multiplayer";
 import {
   createOnChainGame,
   joinOnChainGame,
@@ -34,13 +34,83 @@ import TransactionFeed from "@/components/TransactionFeed";
 export default function Home() {
   const { publicKey, connected, signTransaction, signAllTransactions } = useWallet();
   const { connection } = useConnection();
-  const { phase, mode, createGame, resetGame, isOnChain, txHistory, txPending, txError, onChainGameId, gamePDA, winner, pot, player1, player2, myPlayerIndex, settledOnChain } = useGameStore();
+  const { phase, mode, createGame, resetGame, isOnChain, isDelegated, txHistory, txPending, txError, onChainGameId, gamePDA, winner, pot, player1, player2, myPlayerIndex, settledOnChain } = useGameStore();
+
+  // Track whether we've already attempted delegation for this game
+  const delegationAttempted = useRef(false);
 
   // Create wallet adapter for on-chain calls
   const getWalletAdapter = (): WalletAdapter | null => {
     if (!publicKey || !signTransaction || !signAllTransactions) return null;
     return { publicKey, signTransaction, signAllTransactions };
   };
+
+  // ─── MagicBlock ER Delegation ─────────────────────────
+  // When both players have joined (phase=preflop, mode=multiplayer, both players present),
+  // Player 1 (the creator) automatically delegates the game PDA + hand PDAs to MagicBlock ER.
+  // This makes the game run on the Ephemeral Rollup for fast, gasless gameplay.
+  useEffect(() => {
+    if (
+      mode !== "multiplayer" ||
+      !isOnChain ||
+      isDelegated ||
+      !onChainGameId ||
+      myPlayerIndex !== 0 || // Only Player 1 (creator) delegates
+      !player1 ||
+      !player2 ||
+      !publicKey ||
+      delegationAttempted.current
+    ) return;
+
+    // Only delegate once we're past the waiting phase (both players joined)
+    if (phase !== "preflop" && phase !== "flop" && phase !== "turn" && phase !== "river") return;
+
+    delegationAttempted.current = true;
+
+    const doDelegation = async () => {
+      const wallet = getWalletAdapter();
+      if (!wallet) return;
+
+      try {
+        const p1 = new PublicKey(player1.publicKey);
+        const p2 = new PublicKey(player2.publicKey);
+
+        useGameStore.setState({ lastAction: "🔮 Delegating to MagicBlock ER..." });
+        console.log("🔮 Auto-delegating game to MagicBlock Ephemeral Rollup...");
+
+        const result = await delegateToMagicBlock(wallet, onChainGameId, p1, p2);
+        if (result.success) {
+          console.log("✅ Game delegated to MagicBlock ER!");
+          useGameStore.setState({ isDelegated: true, lastAction: "⚡ MagicBlock ER Active!" });
+          useGameStore.getState().addTransaction({
+            type: "delegate",
+            signature: result.signature!,
+            description: "Game delegated to MagicBlock Ephemeral Rollup",
+            timestamp: Date.now(),
+          });
+          // Notify server that delegation is complete
+          sendDelegationComplete();
+        } else {
+          console.warn("⚠️ Delegation failed (game continues via server):", result.error);
+          useGameStore.setState({ lastAction: "Game active (delegation skipped)" });
+        }
+      } catch (err: any) {
+        console.warn("⚠️ Delegation error (game continues):", err.message);
+        useGameStore.setState({ lastAction: "Game active" });
+      }
+    };
+
+    // Small delay to let the join TX finalize
+    const timer = setTimeout(doDelegation, 3000);
+    return () => clearTimeout(timer);
+  }, [mode, isOnChain, isDelegated, onChainGameId, myPlayerIndex, player1, player2, phase, publicKey]);
+
+  // Reset delegation flag when going back to lobby
+  useEffect(() => {
+    if (phase === "lobby") {
+      delegationAttempted.current = false;
+    }
+  }, [phase]);
 
   const handleCreateGame = async (buyIn: number, name: string) => {
     if (!publicKey) return;
@@ -215,6 +285,8 @@ export default function Home() {
   };
 
   // Handle on-chain settlement: winner clicks "Claim Winnings" button
+  // Flow: If delegated to ER → reveal_winner (commit+undelegate to L1) → settle_game on L1
+  //       If not delegated → settle_game directly on L1
   const handleClaimWinnings = async () => {
     if (!publicKey || !onChainGameId) return;
     const wallet = getWalletAdapter();
@@ -229,13 +301,42 @@ export default function Home() {
     const winnerIndex = winner === player1.publicKey ? 0 : 1;
     const winnerPubkey = new PublicKey(winner);
     const loserPubkey = new PublicKey(winner === player1.publicKey ? player2.publicKey : player1.publicKey);
+    const p1Pubkey = new PublicKey(player1.publicKey);
+    const p2Pubkey = new PublicKey(player2.publicKey);
 
     // Calculate the actual in-game pot (total bets both players made)
-    // This is the server-side pot — NOT the full buy-in
     const actualPot = gameState.pot || 0;
 
     useGameStore.setState({ txPending: true, txError: null, lastAction: "Claiming winnings on-chain..." });
 
+    // Step 1: If game was delegated to MagicBlock ER, commit+undelegate back to L1
+    if (gameState.isDelegated) {
+      try {
+        useGameStore.setState({ lastAction: "🔮 Committing game state from MagicBlock ER to L1..." });
+        console.log("🔮 Revealing winner on MagicBlock ER (commit+undelegate)...");
+
+        const revealResult = await revealWinnerOnChain(wallet, onChainGameId, winnerIndex, p1Pubkey, p2Pubkey);
+        if (revealResult.success) {
+          console.log("✅ ER state committed to L1:", revealResult.signature);
+          useGameStore.getState().addTransaction({
+            type: "reveal",
+            signature: revealResult.signature!,
+            description: "Winner revealed on MagicBlock ER → committed to L1",
+            timestamp: Date.now(),
+          });
+          // ER reveal+settle already handles the pot transfer
+          useGameStore.setState({ settledOnChain: true, txPending: false, lastAction: "🏆 Winnings claimed via MagicBlock ER!" } as any);
+          return;
+        } else {
+          console.warn("⚠️ ER reveal failed, falling back to L1 settle:", revealResult.error);
+        }
+      } catch (err: any) {
+        console.warn("⚠️ ER reveal error, falling back to L1 settle:", err.message);
+      }
+    }
+
+    // Step 2: Settle directly on L1 (either no delegation, or ER reveal failed)
+    useGameStore.setState({ lastAction: "💰 Settling on Solana L1..." });
     const result = await settleGameOnChain(wallet, onChainGameId, winnerIndex, winnerPubkey, loserPubkey, actualPot);
     if (result.success) {
       console.log("✅ On-chain settlement completed:", result.signature);
@@ -263,7 +364,7 @@ export default function Home() {
       bettingPool: { totalPoolPlayer1: 0, totalPoolPlayer2: 0, bets: [], isSettled: false, winningPlayer: 0 },
       winner: null, winnerHandResult: null, isAnimating: false, showCards: false,
       lastAction: "", aiMessage: "", chatMessages: [],
-      isOnChain: false, txHistory: [], txPending: false, txError: null, gamePDA: null,
+      isOnChain: false, isDelegated: false, txHistory: [], txPending: false, txError: null, gamePDA: null,
       walletBalanceBefore: 0, walletBalanceAfter: 0,
     });
   };
@@ -464,7 +565,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="fixed bottom-0 left-0 right-0 py-2 text-center pointer-events-none z-0">
         <div className="text-gray-600 text-[10px]">
-          Private Poker • Program: 7qRu72w...zkqK • {isOnChain ? `⛓️ Game #${onChainGameId} On-Chain` : "MagicBlock Ephemeral Rollup"} • Solana Devnet
+          Private Poker • Program: 7qRu72w...zkqK • {isDelegated ? "⚡ MagicBlock ER Active" : isOnChain ? `⛓️ Game #${onChainGameId} On-Chain` : "MagicBlock Ephemeral Rollup"} • Solana Devnet
         </div>
       </footer>
     </div>

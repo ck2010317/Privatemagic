@@ -124,6 +124,7 @@ function createRoom(buyIn) {
     winnerHand: null,
     bettingPool: { totalPoolPlayer1: 0, totalPoolPlayer2: 0, bets: [], isSettled: false, winningPlayer: 0 },
     onChainGameId: null,
+    isDelegated: false,
     createdAt: Date.now(),
   };
   rooms.set(code, room);
@@ -177,6 +178,7 @@ function broadcastState(room) {
       lastAction: room.lastAction || "",
       bettingPool: room.bettingPool,
       onChainGameId: room.onChainGameId || null,
+      isDelegated: room.isDelegated || false,
     };
     
     // During showdown/settled, reveal all hands
@@ -210,6 +212,7 @@ function broadcastState(room) {
       lastAction: room.lastAction || "",
       bettingPool: room.bettingPool,
       onChainGameId: room.onChainGameId || null,
+      isDelegated: room.isDelegated || false,
     };
     if (showdown && room.players[0] && room.players[1]) {
       state.player1 = { ...state.player1, hand: room.players[0].hand.map(c => ({ ...c, faceUp: true })) };
@@ -523,6 +526,14 @@ wss.on("connection", (ws) => {
         
         setTimeout(() => dealCards(room), 1000);
         broadcastState(room);
+        break;
+      }
+      
+      case "delegation_complete": {
+        if (!currentRoom || playerIndex < 0) return;
+        currentRoom.isDelegated = true;
+        console.log(`[${clientId.slice(0,8)}] Delegation complete for room ${currentRoom.code}`);
+        broadcastState(currentRoom);
         break;
       }
       
