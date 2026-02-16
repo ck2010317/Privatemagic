@@ -152,7 +152,7 @@ export default function Home() {
     if (!publicKey) return;
 
     const wallet = getWalletAdapter();
-    useGameStore.setState({ mode: "multiplayer", txPending: true, txError: null });
+    useGameStore.setState({ mode: "multiplayer", txPending: true, txError: null, lastAction: "Joining game..." });
 
     // Join WebSocket room first
     const success = await joinMultiplayerGame(roomCode, publicKey.toBase58(), name);
@@ -161,16 +161,29 @@ export default function Home() {
       throw new Error("Failed to join");
     }
 
-    // Now pay buy-in on-chain if the game has an on-chain ID
-    // The on-chain game ID is stored by the room creator
-    const gameState = useGameStore.getState();
-    const onChainId = gameState.onChainGameId;
+    // Wait for onChainGameId to arrive from the server (comes in 'joined' or 'state' message)
+    let onChainId: number | null = useGameStore.getState().onChainGameId;
+    if (!onChainId) {
+      // Give the server state broadcast a moment to arrive
+      for (let i = 0; i < 30; i++) {
+        await new Promise((r) => setTimeout(r, 200));
+        onChainId = useGameStore.getState().onChainGameId;
+        if (onChainId) break;
+      }
+    }
+
+    // Now pay buy-in on-chain
     if (wallet && onChainId) {
       try {
+        // Get wallet balance before
+        const balBefore = await getWalletBalance(publicKey);
+        useGameStore.setState({ walletBalanceBefore: balBefore, lastAction: "Paying buy-in on Solana..." });
+
         console.log("💰 Player 2 paying buy-in on-chain for game:", onChainId);
         const result = await joinOnChainGame(wallet, onChainId);
         if (result.success) {
           console.log("✅ Player 2 buy-in paid on-chain:", result.signature);
+          const gameState = useGameStore.getState();
           useGameStore.getState().addTransaction({
             type: "join",
             signature: result.signature!,
@@ -178,11 +191,17 @@ export default function Home() {
             timestamp: Date.now(),
             solAmount: gameState.buyIn,
           });
+          useGameStore.setState({ lastAction: "Buy-in paid! Game starting... 🎮" });
+        } else {
+          console.error("⚠️ On-chain join failed:", result.error);
+          useGameStore.setState({ txError: `On-chain buy-in failed: ${result.error}` });
         }
       } catch (err: any) {
         console.error("⚠️ Failed to pay buy-in on-chain:", err.message);
-        // Game still works via WebSocket, just no on-chain buy-in from P2
+        useGameStore.setState({ txError: `Buy-in payment failed: ${err.message}` });
       }
+    } else if (!onChainId) {
+      console.warn("⚠️ No on-chain game ID found — game may not have on-chain buy-in");
     }
     useGameStore.setState({ txPending: false });
   };

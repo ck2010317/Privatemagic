@@ -114,10 +114,19 @@ function handleServerMessage(msg: Record<string, unknown>) {
     }
     
     case "joined": {
-      useGameStore.setState({
+      const joinUpdate: Partial<GameState> = {
         gameId: msg.roomCode as string,
         myPlayerIndex: msg.playerIndex as 0 | 1 | -1,
-      });
+      };
+      // Store on-chain game ID so player 2 can pay buy-in
+      if (msg.onChainGameId) {
+        joinUpdate.onChainGameId = msg.onChainGameId as number;
+        joinUpdate.isOnChain = true;
+      }
+      if (msg.buyIn) {
+        joinUpdate.buyIn = msg.buyIn as number;
+      }
+      useGameStore.setState(joinUpdate);
       break;
     }
     

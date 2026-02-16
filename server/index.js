@@ -473,8 +473,8 @@ wss.on("connection", (ws) => {
         currentRoom = room;
         playerIndex = 1;
         
-        send(ws, { type: "joined", roomCode: room.code, playerIndex: 1, role: "player" });
-        console.log(`[${clientId.slice(0,8)}] Joined room ${room.code}`);
+        send(ws, { type: "joined", roomCode: room.code, playerIndex: 1, role: "player", onChainGameId: room.onChainGameId || null, buyIn: room.buyIn });
+        console.log(`[${clientId.slice(0,8)}] Joined room ${room.code} (onChainGameId: ${room.onChainGameId || 'none'})`);
         
         // 2 players → deal cards!
         setTimeout(() => dealCards(room), 1500);
