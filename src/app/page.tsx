@@ -16,6 +16,7 @@ import {
   advancePhaseOnChain,
   revealWinnerOnChain,
   settlePotOnChain,
+  settleGameOnChain,
   fetchGameState,
   getWalletBalance,
   getExplorerUrl,
@@ -33,7 +34,7 @@ import TransactionFeed from "@/components/TransactionFeed";
 export default function Home() {
   const { publicKey, connected, signTransaction, signAllTransactions } = useWallet();
   const { connection } = useConnection();
-  const { phase, mode, createGame, resetGame, isOnChain, txHistory, txPending, txError, onChainGameId, gamePDA } = useGameStore();
+  const { phase, mode, createGame, resetGame, isOnChain, txHistory, txPending, txError, onChainGameId, gamePDA, winner, pot, player1, player2, myPlayerIndex, settledOnChain } = useGameStore();
 
   // Create wallet adapter for on-chain calls
   const getWalletAdapter = (): WalletAdapter | null => {
@@ -149,12 +150,41 @@ export default function Home() {
 
   const handleJoinMultiplayer = async (roomCode: string, name: string) => {
     if (!publicKey) return;
-    useGameStore.setState({ mode: "multiplayer" });
+
+    const wallet = getWalletAdapter();
+    useGameStore.setState({ mode: "multiplayer", txPending: true, txError: null });
+
+    // Join WebSocket room first
     const success = await joinMultiplayerGame(roomCode, publicKey.toBase58(), name);
     if (!success) {
-      useGameStore.setState({ mode: "ai", phase: "lobby" });
+      useGameStore.setState({ mode: "ai", phase: "lobby", txPending: false });
       throw new Error("Failed to join");
     }
+
+    // Now pay buy-in on-chain if the game has an on-chain ID
+    // The on-chain game ID is stored by the room creator
+    const gameState = useGameStore.getState();
+    const onChainId = gameState.onChainGameId;
+    if (wallet && onChainId) {
+      try {
+        console.log("💰 Player 2 paying buy-in on-chain for game:", onChainId);
+        const result = await joinOnChainGame(wallet, onChainId);
+        if (result.success) {
+          console.log("✅ Player 2 buy-in paid on-chain:", result.signature);
+          useGameStore.getState().addTransaction({
+            type: "join",
+            signature: result.signature!,
+            description: `Joined game — buy-in paid on-chain`,
+            timestamp: Date.now(),
+            solAmount: gameState.buyIn,
+          });
+        }
+      } catch (err: any) {
+        console.error("⚠️ Failed to pay buy-in on-chain:", err.message);
+        // Game still works via WebSocket, just no on-chain buy-in from P2
+      }
+    }
+    useGameStore.setState({ txPending: false });
   };
 
   const handleNewGame = () => {
@@ -165,47 +195,39 @@ export default function Home() {
     }
   };
 
-  // Handle on-chain settlement when game is settled
-  useEffect(() => {
-    if (phase === "settled" && isOnChain && publicKey && onChainGameId) {
-      const wallet = getWalletAdapter();
-      if (!wallet) return;
+  // Handle on-chain settlement: winner clicks "Claim Winnings" button
+  const handleClaimWinnings = async () => {
+    if (!publicKey || !onChainGameId) return;
+    const wallet = getWalletAdapter();
+    if (!wallet) return;
 
-      // Get winner from game state
-      const gameState = useGameStore.getState();
-      const winner = gameState.winner;
-      const player1 = gameState.player1;
-      const player2 = gameState.player2;
+    const gameState = useGameStore.getState();
+    const winner = gameState.winner;
+    const player1 = gameState.player1;
+    const player2 = gameState.player2;
+    if (!winner || !player1 || !player2) return;
 
-      if (!winner || !player1 || !player2) return;
+    const winnerIndex = winner === player1.publicKey ? 0 : 1;
+    const winnerPubkey = new PublicKey(winner);
 
-      // Determine winner index (0 = player1, 1 = player2)
-      const winnerIndex = winner === player1.id ? 0 : 1;
+    useGameStore.setState({ txPending: true, txError: null, lastAction: "Claiming winnings on-chain..." });
 
-      // Call settle function ONLY ONCE
-      const settledOnChain = (gameState as any).settledOnChain;
-      if (settledOnChain) return;
-
-      console.log("🏆 Settling on-chain with winner index:", winnerIndex);
-      revealWinnerOnChain(wallet, onChainGameId, winnerIndex, new PublicKey(player1.publicKey), new PublicKey(player2.publicKey))
-        .then((result) => {
-          if (result.success) {
-            console.log("✅ On-chain settlement completed:", result.signature);
-            useGameStore.getState().addTransaction({
-              type: "settle",
-              signature: result.signature!,
-              description: `Winner settled on-chain`,
-              timestamp: Date.now(),
-              solAmount: 0,
-            });
-            // Mark as settled on-chain to prevent duplicate calls
-            useGameStore.setState({ settledOnChain: true } as any);
-          } else {
-            console.error("❌ On-chain settlement failed:", result.error);
-          }
-        });
+    const result = await settleGameOnChain(wallet, onChainGameId, winnerIndex, winnerPubkey);
+    if (result.success) {
+      console.log("✅ On-chain settlement completed:", result.signature);
+      useGameStore.getState().addTransaction({
+        type: "settle",
+        signature: result.signature!,
+        description: `Winnings claimed on-chain`,
+        timestamp: Date.now(),
+        solAmount: gameState.pot,
+      });
+      useGameStore.setState({ settledOnChain: true, txPending: false, lastAction: "🏆 Winnings claimed!" } as any);
+    } else {
+      console.error("❌ On-chain settlement failed:", result.error);
+      useGameStore.setState({ txPending: false, txError: result.error || "Settlement failed" });
     }
-  }, [phase, isOnChain, publicKey, onChainGameId]);
+  };
 
   const handleBackToLobby = () => {
     if (mode === "multiplayer") {
@@ -346,28 +368,60 @@ export default function Home() {
 
               {/* Game Over buttons */}
               {(phase === "settled" || phase === "showdown") && (
-                <div className="flex gap-4 mt-6">
-                  <motion.button
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 2 }}
-                    onClick={handleNewGame}
-                    className="px-8 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-black font-black
-                      rounded-2xl text-lg hover:from-yellow-400 hover:to-orange-400 transition-all
-                      shadow-lg shadow-orange-500/20"
-                  >
-                    {mode === "multiplayer" ? "🔄 Rematch" : "🎮 New Game"}
-                  </motion.button>
-                  <motion.button
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 2.2 }}
-                    onClick={handleBackToLobby}
-                    className="px-6 py-3 bg-gray-800 text-gray-300 font-bold
-                      rounded-2xl text-lg hover:bg-gray-700 transition-all border border-gray-700"
-                  >
-                    🏠 Lobby
-                  </motion.button>
+                <div className="flex flex-col items-center gap-4 mt-6">
+                  {/* Claim Winnings button — only shown to the winner if on-chain and not yet settled */}
+                  {isOnChain && onChainGameId && winner && publicKey && (() => {
+                    const isWinner = (myPlayerIndex === 0 && winner === player1?.publicKey) || 
+                                     (myPlayerIndex === 1 && winner === player2?.publicKey);
+                    if (isWinner && settledOnChain) {
+                      return (
+                        <div className="px-8 py-3 bg-green-900/50 border border-green-500/30 rounded-2xl text-green-400 font-bold text-lg">
+                          ✅ Winnings Claimed!
+                        </div>
+                      );
+                    }
+                    if (isWinner && !settledOnChain) {
+                      return (
+                        <motion.button
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: 1, type: "spring" }}
+                          onClick={handleClaimWinnings}
+                          disabled={txPending}
+                          className="px-10 py-4 bg-gradient-to-r from-green-400 to-emerald-500 text-black font-black
+                            rounded-2xl text-xl hover:from-green-300 hover:to-emerald-400 transition-all
+                            shadow-lg shadow-green-500/30 animate-pulse disabled:opacity-50 disabled:animate-none"
+                        >
+                          {txPending ? "⏳ Claiming..." : `💰 Claim ${lamportsToSol(pot)} SOL Winnings`}
+                        </motion.button>
+                      );
+                    }
+                    return null;
+                  })()}
+
+                  <div className="flex gap-4">
+                    <motion.button
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 2 }}
+                      onClick={handleNewGame}
+                      className="px-8 py-3 bg-gradient-to-r from-yellow-500 to-orange-500 text-black font-black
+                        rounded-2xl text-lg hover:from-yellow-400 hover:to-orange-400 transition-all
+                        shadow-lg shadow-orange-500/20"
+                    >
+                      {mode === "multiplayer" ? "🔄 Rematch" : "🎮 New Game"}
+                    </motion.button>
+                    <motion.button
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 2.2 }}
+                      onClick={handleBackToLobby}
+                      className="px-6 py-3 bg-gray-800 text-gray-300 font-bold
+                        rounded-2xl text-lg hover:bg-gray-700 transition-all border border-gray-700"
+                    >
+                      🏠 Lobby
+                    </motion.button>
+                  </div>
                 </div>
               )}
             </div>
@@ -386,7 +440,7 @@ export default function Home() {
       {/* Footer */}
       <footer className="fixed bottom-0 left-0 right-0 py-2 text-center pointer-events-none z-0">
         <div className="text-gray-600 text-[10px]">
-          Private Poker • Program: 5c9wR99...XB7v6Qi • {isOnChain ? `⛓️ Game #${onChainGameId} On-Chain` : "MagicBlock Ephemeral Rollup"} • Solana Devnet
+          Private Poker • Program: 7qRu72w...zkqK • {isOnChain ? `⛓️ Game #${onChainGameId} On-Chain` : "MagicBlock Ephemeral Rollup"} • Solana Devnet
         </div>
       </footer>
     </div>

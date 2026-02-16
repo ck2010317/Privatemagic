@@ -552,6 +552,51 @@ export async function settlePotOnChain(
   }
 }
 
+/**
+ * Settle game directly on L1 — sets winner + transfers pot in one call.
+ * Works from ANY phase (for when gameplay happens off-chain via WebSocket).
+ * The winner calls this to claim their winnings.
+ */
+export async function settleGameOnChain(
+  wallet: WalletAdapter,
+  gameId: number,
+  winnerIndex: number, // 0=player1, 1=player2
+  winnerPubkey: PublicKey
+): Promise<TransactionResult> {
+  try {
+    const program = getProgram(wallet);
+    const [gamePDA] = getGamePDA(BigInt(gameId));
+
+    console.log("🏆 Settling game on Solana L1...", {
+      gameId,
+      winnerIndex,
+      winner: winnerPubkey.toString(),
+    });
+
+    const tx = await program.methods
+      .settleGame(winnerIndex)
+      .accounts({
+        game: gamePDA,
+        winner: winnerPubkey,
+        payer: wallet.publicKey,
+      })
+      .rpc();
+
+    console.log("✅ Game settled! SOL transferred to winner. TX:", tx);
+
+    if (currentGameState) {
+      currentGameState.txSignatures.push(tx);
+      currentGameState.phase = "settled";
+      currentGameState.winner = winnerPubkey.toString();
+    }
+
+    return { success: true, signature: tx };
+  } catch (err: any) {
+    console.error("❌ Failed to settle game:", err);
+    return { success: false, error: err.message };
+  }
+}
+
 // =================== READ ON-CHAIN STATE ===================
 
 /**

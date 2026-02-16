@@ -1157,6 +1157,69 @@
       ]
     },
     {
+      "name": "settle_game",
+      "docs": [
+        "🏆 Settle game directly on L1 — sets winner + transfers pot in one call",
+        "Works from ANY phase (for when gameplay happens off-chain via WebSocket)",
+        "Either player can call this (winner is incentivized to claim)"
+      ],
+      "discriminator": [
+        96,
+        54,
+        24,
+        189,
+        239,
+        198,
+        86,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  107,
+                  101,
+                  114,
+                  95,
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "winner",
+          "writable": true
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "winner_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "settle_pot",
       "docs": [
         "6b️⃣ Settle pot on base layer (after undelegation completes)",

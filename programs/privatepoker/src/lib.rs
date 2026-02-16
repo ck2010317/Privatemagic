@@ -303,6 +303,56 @@ pub mod privatepoker {
         Ok(())
     }
 
+    /// 🏆 Settle game directly on L1 — sets winner + transfers pot in one call
+    /// Works from ANY phase (for when gameplay happens off-chain via WebSocket)
+    /// Either player can call this (winner is incentivized to claim)
+    pub fn settle_game(ctx: Context<SettleGame>, winner_index: u8) -> Result<()> {
+        let game = &mut ctx.accounts.game;
+
+        // Can only settle once
+        require!(game.phase != GamePhase::Settled, GameError::AlreadySettled);
+        // Must have both players
+        require!(game.player1.is_some() && game.player2.is_some(), GameError::MissingOpponent);
+
+        let player1 = game.player1.unwrap();
+        let player2 = game.player2.unwrap();
+
+        // Verify the caller is one of the players
+        let caller = ctx.accounts.payer.key();
+        require!(caller == player1 || caller == player2, GameError::NotInGame);
+
+        // Determine winner
+        let winner_pubkey = match winner_index {
+            0 => player1,
+            1 => player2,
+            _ => return Err(GameError::InvalidPlayer.into()),
+        };
+
+        // Verify the winner account matches
+        require!(ctx.accounts.winner.key() == winner_pubkey, GameError::InvalidPlayer);
+
+        // Update game state
+        game.winner = GameResult::Winner(winner_pubkey);
+        game.phase = GamePhase::Settled;
+
+        // Transfer pot from game PDA to winner
+        let pot = game.pot;
+        game.pot = 0;
+        let game_id = game.game_id;
+
+        // Drop mutable borrow before lamport manipulation
+        drop(game);
+
+        if pot > 0 {
+            let game_info = ctx.accounts.game.to_account_info();
+            **game_info.try_borrow_mut_lamports()? -= pot;
+            **ctx.accounts.winner.to_account_info().try_borrow_mut_lamports()? += pot;
+        }
+
+        msg!("Game {} settled! {} lamports transferred to winner {}", game_id, pot, winner_pubkey);
+        Ok(())
+    }
+
     // =================== BETTING POOL ===================
 
     /// 7️⃣ Create a betting pool for a game
@@ -615,6 +665,21 @@ pub struct RevealWinner<'info> {
 /// Transfers SOL from game PDA to the winner
 #[derive(Accounts)]
 pub struct SettlePot<'info> {
+    #[account(mut, seeds = [GAME_SEED, &game.game_id.to_le_bytes()], bump)]
+    pub game: Account<'info, Game>,
+
+    /// CHECK: Winner account to receive pot payout
+    #[account(mut)]
+    pub winner: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub payer: Signer<'info>,
+}
+
+/// SettleGame — one-shot settle from any phase on L1
+/// Sets winner + transfers pot in a single tx
+#[derive(Accounts)]
+pub struct SettleGame<'info> {
     #[account(mut, seeds = [GAME_SEED, &game.game_id.to_le_bytes()], bump)]
     pub game: Account<'info, Game>,
 

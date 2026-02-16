@@ -123,6 +123,7 @@ function createRoom(buyIn) {
     winner: null,
     winnerHand: null,
     bettingPool: { totalPoolPlayer1: 0, totalPoolPlayer2: 0, bets: [], isSettled: false, winningPlayer: 0 },
+    onChainGameId: null,
     createdAt: Date.now(),
   };
   rooms.set(code, room);
@@ -175,6 +176,7 @@ function broadcastState(room) {
       showCards: showdown,
       lastAction: room.lastAction || "",
       bettingPool: room.bettingPool,
+      onChainGameId: room.onChainGameId || null,
     };
     
     // During showdown/settled, reveal all hands
@@ -207,6 +209,7 @@ function broadcastState(room) {
       showCards: showdown,
       lastAction: room.lastAction || "",
       bettingPool: room.bettingPool,
+      onChainGameId: room.onChainGameId || null,
     };
     if (showdown && room.players[0] && room.players[1]) {
       state.player1 = { ...state.player1, hand: room.players[0].hand.map(c => ({ ...c, faceUp: true })) };
@@ -418,6 +421,7 @@ wss.on("connection", (ws) => {
     switch (msg.type) {
       case "create": {
         const room = createRoom(msg.buyIn);
+        if (msg.onChainGameId) room.onChainGameId = msg.onChainGameId;
         const player = {
           ws, id: clientId,
           name: msg.name || "Anon",

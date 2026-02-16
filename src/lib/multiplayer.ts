@@ -125,7 +125,7 @@ function handleServerMessage(msg: Record<string, unknown>) {
       // Server sends the authoritative game state
       const s = msg as Record<string, unknown>;
       
-      useGameStore.setState({
+      const stateUpdate: Partial<GameState> = {
         gameId: s.gameId as string,
         phase: s.phase as GamePhase,
         pot: s.pot as number,
@@ -143,7 +143,15 @@ function handleServerMessage(msg: Record<string, unknown>) {
         lastAction: s.lastAction as string,
         bettingPool: s.bettingPool as GameState["bettingPool"],
         isAnimating: false,
-      });
+      };
+
+      // Propagate on-chain game ID from server if present
+      if (s.onChainGameId) {
+        stateUpdate.onChainGameId = s.onChainGameId as number;
+        stateUpdate.isOnChain = true;
+      }
+
+      useGameStore.setState(stateUpdate);
       break;
     }
     
@@ -162,12 +170,16 @@ export async function createMultiplayerGame(buyIn: number, playerKey: string, pl
   currentMode = "multiplayer";
   const url = getServerUrl();
   await connect(url);
-  
+
+  // Include on-chain game ID so player 2 can pay buy-in on-chain
+  const onChainGameId = useGameStore.getState().onChainGameId;
+
   sendMsg({
     type: "create",
     buyIn,
     publicKey: playerKey,
     name: playerName,
+    onChainGameId: onChainGameId || null,
   });
   
   // Wait for room code
