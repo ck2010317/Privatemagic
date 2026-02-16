@@ -921,9 +921,6 @@
     },
     {
       "name": "process_undelegation",
-      "docs": [
-        "Undelegation callback - called by ER when accounts are undelegated back to L1"
-      ],
       "discriminator": [
         196,
         28,
