@@ -304,9 +304,10 @@ pub mod privatepoker {
     }
 
     /// 🏆 Settle game directly on L1 — sets winner + transfers pot in one call
-    /// Works from ANY phase (for when gameplay happens off-chain via WebSocket)
-    /// Either player can call this (winner is incentivized to claim)
-    pub fn settle_game(ctx: Context<SettleGame>, winner_index: u8) -> Result<()> {
+    /// Winner gets the actual in-game pot, loser gets their remaining SOL back.
+    /// actual_pot = total lamports bet during the hand (both players' bets combined)
+    /// If actual_pot is 0, falls back to winner-take-all (full game.pot to winner).
+    pub fn settle_game(ctx: Context<SettleGame>, winner_index: u8, actual_pot: u64) -> Result<()> {
         let game = &mut ctx.accounts.game;
 
         // Can only settle once
@@ -321,35 +322,55 @@ pub mod privatepoker {
         let caller = ctx.accounts.payer.key();
         require!(caller == player1 || caller == player2, GameError::NotInGame);
 
-        // Determine winner
-        let winner_pubkey = match winner_index {
-            0 => player1,
-            1 => player2,
+        // Determine winner and loser
+        let (winner_pubkey, loser_pubkey) = match winner_index {
+            0 => (player1, player2),
+            1 => (player2, player1),
             _ => return Err(GameError::InvalidPlayer.into()),
         };
 
-        // Verify the winner account matches
+        // Verify the winner and loser accounts match
         require!(ctx.accounts.winner.key() == winner_pubkey, GameError::InvalidPlayer);
+        require!(ctx.accounts.loser.key() == loser_pubkey, GameError::InvalidPlayer);
 
         // Update game state
         game.winner = GameResult::Winner(winner_pubkey);
         game.phase = GamePhase::Settled;
 
-        // Transfer pot from game PDA to winner
-        let pot = game.pot;
+        // Calculate amounts:
+        // total_in_pda = all SOL held in the game PDA (buy_in * 2)
+        // actual_pot = the real in-game pot from the server (bets both players made)
+        // winner gets: actual_pot (capped at total_in_pda)
+        // loser gets: total_in_pda - actual_pot (their remaining unbet SOL)
+        let total_in_pda = game.pot; // This is buy_in * 2 from create+join
+        let capped_pot = if actual_pot > 0 && actual_pot <= total_in_pda {
+            actual_pot
+        } else {
+            total_in_pda // Fallback: winner takes all
+        };
+        let loser_refund = total_in_pda.saturating_sub(capped_pot);
+
         game.pot = 0;
         let game_id = game.game_id;
 
         // Drop mutable borrow before lamport manipulation
         drop(game);
 
-        if pot > 0 {
-            let game_info = ctx.accounts.game.to_account_info();
-            **game_info.try_borrow_mut_lamports()? -= pot;
-            **ctx.accounts.winner.to_account_info().try_borrow_mut_lamports()? += pot;
+        let game_info = ctx.accounts.game.to_account_info();
+
+        // Transfer pot to winner
+        if capped_pot > 0 {
+            **game_info.try_borrow_mut_lamports()? -= capped_pot;
+            **ctx.accounts.winner.to_account_info().try_borrow_mut_lamports()? += capped_pot;
         }
 
-        msg!("Game {} settled! {} lamports transferred to winner {}", game_id, pot, winner_pubkey);
+        // Refund remaining SOL to loser
+        if loser_refund > 0 {
+            **game_info.try_borrow_mut_lamports()? -= loser_refund;
+            **ctx.accounts.loser.to_account_info().try_borrow_mut_lamports()? += loser_refund;
+        }
+
+        msg!("Game {} settled! {} lamports to winner {}, {} lamports refunded to loser {}", game_id, capped_pot, winner_pubkey, loser_refund, loser_pubkey);
         Ok(())
     }
 
@@ -677,7 +698,7 @@ pub struct SettlePot<'info> {
 }
 
 /// SettleGame — one-shot settle from any phase on L1
-/// Sets winner + transfers pot in a single tx
+/// Sets winner + transfers pot, refunds loser remainder
 #[derive(Accounts)]
 pub struct SettleGame<'info> {
     #[account(mut, seeds = [GAME_SEED, &game.game_id.to_le_bytes()], bump)]
@@ -686,6 +707,10 @@ pub struct SettleGame<'info> {
     /// CHECK: Winner account to receive pot payout
     #[account(mut)]
     pub winner: AccountInfo<'info>,
+
+    /// CHECK: Loser account to receive refund of unbet SOL
+    #[account(mut)]
+    pub loser: AccountInfo<'info>,
 
     #[account(mut)]
     pub payer: Signer<'info>,

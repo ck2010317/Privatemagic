@@ -228,20 +228,25 @@ export default function Home() {
 
     const winnerIndex = winner === player1.publicKey ? 0 : 1;
     const winnerPubkey = new PublicKey(winner);
+    const loserPubkey = new PublicKey(winner === player1.publicKey ? player2.publicKey : player1.publicKey);
+
+    // Calculate the actual in-game pot (total bets both players made)
+    // This is the server-side pot — NOT the full buy-in
+    const actualPot = gameState.pot || 0;
 
     useGameStore.setState({ txPending: true, txError: null, lastAction: "Claiming winnings on-chain..." });
 
-    const result = await settleGameOnChain(wallet, onChainGameId, winnerIndex, winnerPubkey);
+    const result = await settleGameOnChain(wallet, onChainGameId, winnerIndex, winnerPubkey, loserPubkey, actualPot);
     if (result.success) {
       console.log("✅ On-chain settlement completed:", result.signature);
       useGameStore.getState().addTransaction({
         type: "settle",
         signature: result.signature!,
-        description: `Winnings claimed on-chain`,
+        description: `Winnings claimed on-chain — loser refunded remaining SOL`,
         timestamp: Date.now(),
-        solAmount: gameState.pot,
+        solAmount: actualPot,
       });
-      useGameStore.setState({ settledOnChain: true, txPending: false, lastAction: "🏆 Winnings claimed!" } as any);
+      useGameStore.setState({ settledOnChain: true, txPending: false, lastAction: "🏆 Winnings claimed! Loser refunded." } as any);
     } else {
       console.error("❌ On-chain settlement failed:", result.error);
       useGameStore.setState({ txPending: false, txError: result.error || "Settlement failed" });

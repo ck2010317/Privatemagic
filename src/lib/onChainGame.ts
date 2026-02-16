@@ -554,14 +554,17 @@ export async function settlePotOnChain(
 
 /**
  * Settle game directly on L1 — sets winner + transfers pot in one call.
- * Works from ANY phase (for when gameplay happens off-chain via WebSocket).
- * The winner calls this to claim their winnings.
+ * Winner gets the actual in-game pot, loser gets remaining SOL refunded.
+ * actualPot = total lamports both players bet during the hand.
+ * If actualPot is 0 or not provided, falls back to winner-take-all.
  */
 export async function settleGameOnChain(
   wallet: WalletAdapter,
   gameId: number,
   winnerIndex: number, // 0=player1, 1=player2
-  winnerPubkey: PublicKey
+  winnerPubkey: PublicKey,
+  loserPubkey: PublicKey,
+  actualPot: number = 0
 ): Promise<TransactionResult> {
   try {
     const program = getProgram(wallet);
@@ -571,18 +574,21 @@ export async function settleGameOnChain(
       gameId,
       winnerIndex,
       winner: winnerPubkey.toString(),
+      loser: loserPubkey.toString(),
+      actualPot,
     });
 
     const tx = await program.methods
-      .settleGame(winnerIndex)
+      .settleGame(winnerIndex, new BN(actualPot))
       .accounts({
         game: gamePDA,
         winner: winnerPubkey,
+        loser: loserPubkey,
         payer: wallet.publicKey,
       })
       .rpc();
 
-    console.log("✅ Game settled! SOL transferred to winner. TX:", tx);
+    console.log("✅ Game settled! SOL transferred to winner, remainder refunded to loser. TX:", tx);
 
     if (currentGameState) {
       currentGameState.txSignatures.push(tx);

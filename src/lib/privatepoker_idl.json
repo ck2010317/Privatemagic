@@ -1160,8 +1160,9 @@
       "name": "settle_game",
       "docs": [
         "🏆 Settle game directly on L1 — sets winner + transfers pot in one call",
-        "Works from ANY phase (for when gameplay happens off-chain via WebSocket)",
-        "Either player can call this (winner is incentivized to claim)"
+        "Winner gets the actual in-game pot, loser gets their remaining SOL back.",
+        "actual_pot = total lamports bet during the hand (both players' bets combined)",
+        "If actual_pot is 0, falls back to winner-take-all (full game.pot to winner)."
       ],
       "discriminator": [
         96,
@@ -1207,6 +1208,10 @@
           "writable": true
         },
         {
+          "name": "loser",
+          "writable": true
+        },
+        {
           "name": "payer",
           "writable": true,
           "signer": true
@@ -1216,6 +1221,10 @@
         {
           "name": "winner_index",
           "type": "u8"
+        },
+        {
+          "name": "actual_pot",
+          "type": "u64"
         }
       ]
     },
