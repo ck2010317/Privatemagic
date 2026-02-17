@@ -16,7 +16,7 @@
  *   8. Settle pot → Solana L1 (transfers SOL to winner)
  */
 
-import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, SystemProgram } from "@solana/web3.js";
+import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, SystemProgram, VersionedTransaction } from "@solana/web3.js";
 import { Program, AnchorProvider, BN, Idl } from "@coral-xyz/anchor";
 import {
   PROGRAM_ID,
@@ -236,54 +236,68 @@ export async function delegateToMagicBlock(
 
     console.log("🔮 Delegating game PDA to MagicBlock ER...");
 
-    // 1. Delegate game PDA
-    const tx1 = await program.methods
+    // Build 3 delegation instructions and combine into one transaction
+    const instructions = [];
+
+    // 1. Delegate game PDA instruction
+    const ix1 = await program.methods
       .delegatePda({ game: { gameId: gameIdBN } })
       .accounts({
         pda: gamePDA,
         payer: wallet.publicKey,
+        validator: ER_VALIDATOR,
       })
-      .remainingAccounts([
-        { pubkey: ER_VALIDATOR, isWritable: false, isSigner: false },
-      ])
-      .rpc();
+      .instruction();
+    instructions.push(ix1);
 
-    console.log("✅ Game PDA delegated to ER:", tx1);
-
-    // 2. Delegate player 1 hand PDA
-    const tx2 = await program.methods
+    // 2. Delegate player 1 hand PDA instruction
+    const ix2 = await program.methods
       .delegatePda({ playerHand: { gameId: gameIdBN, player: player1Pubkey } })
       .accounts({
         pda: hand1PDA,
         payer: wallet.publicKey,
+        validator: ER_VALIDATOR,
       })
-      .remainingAccounts([
-        { pubkey: ER_VALIDATOR, isWritable: false, isSigner: false },
-      ])
-      .rpc();
+      .instruction();
+    instructions.push(ix2);
 
-    console.log("✅ Player 1 hand delegated to ER:", tx2);
-
-    // 3. Delegate player 2 hand PDA
-    const tx3 = await program.methods
+    // 3. Delegate player 2 hand PDA instruction
+    const ix3 = await program.methods
       .delegatePda({ playerHand: { gameId: gameIdBN, player: player2Pubkey } })
       .accounts({
         pda: hand2PDA,
         payer: wallet.publicKey,
+        validator: ER_VALIDATOR,
       })
-      .remainingAccounts([
-        { pubkey: ER_VALIDATOR, isWritable: false, isSigner: false },
-      ])
-      .rpc();
+      .instruction();
+    instructions.push(ix3);
 
-    console.log("✅ Player 2 hand delegated to ER:", tx3);
+    // Combine into a single transaction and sign
+    const recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+    const tx = new Transaction({
+      recentBlockhash,
+      feePayer: wallet.publicKey,
+    });
+    tx.add(...instructions);
+
+    // Sign transaction
+    const signedTx = await wallet.signTransaction(tx);
+    const txSignature = await connection.sendRawTransaction(signedTx.serialize(), {
+      skipPreflight: false,
+    });
+
+    console.log("✅ Delegation transaction sent:", txSignature);
+
+    // Wait for confirmation
+    await connection.confirmTransaction(txSignature, "confirmed");
+    console.log("✅ All 3 PDAs delegated to ER!");
 
     if (currentGameState) {
       currentGameState.isDelegated = true;
-      currentGameState.txSignatures.push(tx1, tx2, tx3);
+      currentGameState.txSignatures.push(txSignature);
     }
 
-    return { success: true, signature: tx1 };
+    return { success: true, signature: txSignature };
   } catch (err: any) {
     console.error("❌ Failed to delegate to MagicBlock:", err);
     return { success: false, error: err.message };
