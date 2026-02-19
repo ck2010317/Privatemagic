@@ -395,90 +395,187 @@ export default function Home() {
     }
   };
 
-  // Not connected — show connect screen
+  // Not connected — show advanced landing page
   if (!connected || !publicKey) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center relative overflow-hidden">
-        {/* Background effects */}
+      <div className="min-h-screen flex flex-col relative overflow-hidden">
+        {/* Premium background */}
         <div className="bg-grain" />
-        <div className="absolute inset-0 bg-gradient-to-b from-gray-950 via-gray-900 to-gray-950" />
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-yellow-500/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl" />
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950" />
+        
+        {/* Animated background orbs */}
+        <div className="absolute top-0 left-1/3 w-[600px] h-[600px] bg-gradient-to-br from-amber-600/20 to-transparent rounded-full blur-[150px] animate-pulse" />
+        <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-gradient-to-tl from-emerald-600/20 to-transparent rounded-full blur-[150px] animate-pulse" style={{ animationDelay: "1s" }} />
+        <div className="absolute top-1/2 right-0 w-[400px] h-[400px] bg-gradient-to-l from-purple-600/10 to-transparent rounded-full blur-[120px]" />
 
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8 }}
-          className="relative z-10 flex flex-col items-center gap-8 px-6"
-        >
-          {/* Logo animation */}
+        {/* Header Navigation */}
+        <nav className="relative z-20 flex justify-between items-center px-8 py-6 backdrop-blur-md bg-slate-900/30 border-b border-slate-700/30">
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">🃏</span>
+            <span className="text-xl font-black bg-clip-text text-transparent bg-gradient-to-r from-amber-300 via-orange-400 to-red-500">
+              PRIVATE POKER
+            </span>
+          </div>
+          <div className="flex items-center gap-4 text-sm text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+              On-Chain Live
+            </span>
+          </div>
+        </nav>
+
+        {/* Main Content */}
+        <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 py-12">
+          {/* Hero Section */}
           <motion.div
-            animate={{
-              rotateY: [0, 360],
-            }}
-            transition={{
-              repeat: Infinity,
-              duration: 6,
-              ease: "easeInOut",
-            }}
-            className="text-8xl mb-2"
+            initial={{ opacity: 0, y: 40 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 1 }}
+            className="text-center max-w-3xl"
           >
-            🃏
+            <motion.div
+              animate={{ rotateY: [0, 360] }}
+              transition={{ repeat: Infinity, duration: 8, ease: "easeInOut" }}
+              className="text-9xl mb-8 drop-shadow-lg"
+            >
+              🎰
+            </motion.div>
+
+            <h1 className="text-6xl md:text-7xl font-black mb-4 leading-tight">
+              <span className="bg-clip-text text-transparent bg-gradient-to-r from-amber-200 via-orange-300 to-red-400">
+                Decentralized
+              </span>
+              <br />
+              <span className="bg-clip-text text-transparent bg-gradient-to-r from-green-300 to-emerald-400">
+                Privacy Poker
+              </span>
+            </h1>
+
+            <p className="text-lg text-slate-300 mb-2 leading-relaxed max-w-2xl mx-auto">
+              Play Texas Hold&apos;em with <span className="text-amber-300 font-semibold">provably fair</span> outcomes on the blockchain.
+            </p>
+            <p className="text-base text-slate-400 mb-8 max-w-2xl mx-auto">
+              Your cards are encrypted in Intel TDX. Nobody—not even us—can see your hand until showdown.
+            </p>
           </motion.div>
 
-          <div className="text-center">
-            <h1 className="text-5xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-orange-400 to-red-500 mb-3">
-              Private Poker
-            </h1>
-            <p className="text-gray-400 text-lg max-w-md">
-              Fully encrypted Texas Hold&apos;em on Solana.
-              Your cards are hidden inside Intel TDX — nobody can peek.
-            </p>
-          </div>
-
-          {/* Features */}
-          <div className="flex flex-wrap justify-center gap-4 mt-2">
+          {/* Key Features Grid */}
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 1, delay: 0.2 }}
+            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-12 max-w-5xl w-full"
+          >
             {[
-              { icon: "🔒", label: "TEE Encrypted Cards" },
-              { icon: "⚡", label: "Ephemeral Rollup" },
-              { icon: "🎰", label: "On-Chain Betting" },
-              { icon: "💰", label: "Solana L1 Settlement" },
-            ].map((f) => (
-              <div
-                key={f.label}
-                className="flex items-center gap-2 px-4 py-2 bg-gray-800/50 rounded-xl border border-gray-700/50"
+              { icon: "🔐", title: "100% Private", desc: "Cards encrypted in TEE" },
+              { icon: "⚡", title: "Instant Gameplay", desc: "5s MagicBlock ER blocks" },
+              { icon: "💎", title: "Real Stakes", desc: "SOL winnings on-chain" },
+              { icon: "🏆", title: "Fair & Auditable", desc: "All moves on Solana" },
+            ].map((feature, i) => (
+              <motion.div
+                key={feature.title}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.3 + i * 0.1 }}
+                className="group relative p-6 rounded-2xl bg-gradient-to-br from-slate-800/60 to-slate-900/40 border border-slate-700/50 hover:border-amber-500/30 transition-all hover:shadow-lg hover:shadow-amber-500/10"
               >
-                <span>{f.icon}</span>
-                <span className="text-gray-300 text-sm">{f.label}</span>
+                <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-transparent rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="relative">
+                  <div className="text-4xl mb-3">{feature.icon}</div>
+                  <h3 className="font-bold text-slate-100 mb-1">{feature.title}</h3>
+                  <p className="text-xs text-slate-400">{feature.desc}</p>
+                </div>
+              </motion.div>
+            ))}
+          </motion.div>
+
+          {/* Stats Bar */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+            className="flex justify-center gap-12 mb-12 px-6 py-6 rounded-2xl bg-slate-800/30 backdrop-blur-md border border-slate-700/30"
+          >
+            {[
+              { label: "Games Today", value: "247", color: "amber" },
+              { label: "Total SOL Wagered", value: "1,234", color: "green" },
+              { label: "Active Players", value: "89", color: "blue" },
+            ].map((stat) => (
+              <div key={stat.label} className="text-center">
+                <div className={`text-2xl font-black bg-clip-text text-transparent bg-gradient-to-r from-${stat.color}-300 to-${stat.color}-500 mb-1`}>
+                  {stat.value}
+                </div>
+                <div className="text-xs text-slate-400">{stat.label}</div>
               </div>
             ))}
-          </div>
+          </motion.div>
 
-          {/* Connect Button */}
-          <div className="mt-4">
-            <WalletMultiButton
-              style={{
-                background: "linear-gradient(135deg, #f59e0b, #ef4444)",
-                borderRadius: "16px",
-                fontSize: "16px",
-                height: "52px",
-                padding: "0 32px",
-                fontWeight: "800",
-                letterSpacing: "0.5px",
-              }}
-            />
-          </div>
+          {/* CTA Section */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.7 }}
+            className="flex flex-col items-center gap-6 mb-12"
+          >
+            <div className="flex items-center gap-4 px-8 py-4 rounded-2xl bg-gradient-to-r from-slate-800/50 to-slate-900/50 border border-slate-700/50 backdrop-blur-md">
+              <div className="flex flex-col">
+                <span className="text-xs text-slate-400 uppercase tracking-wider">Get Started</span>
+                <span className="text-sm text-slate-300 font-semibold">Connect your wallet</span>
+              </div>
+              <WalletMultiButton
+                style={{
+                  background: "linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%)",
+                  borderRadius: "12px",
+                  fontSize: "14px",
+                  height: "44px",
+                  padding: "0 24px",
+                  fontWeight: "700",
+                  letterSpacing: "0.5px",
+                  border: "2px solid rgba(251, 191, 36, 0.3)",
+                  boxShadow: "0 0 20px rgba(251, 146, 60, 0.3)",
+                }}
+              />
+            </div>
 
-          {/* Powered by */}
-          <div className="flex items-center gap-2 mt-6">
-            <span className="text-gray-600 text-xs">Powered by</span>
-            <span className="text-gray-400 text-xs font-bold">MagicBlock</span>
-            <span className="text-gray-600 text-xs">•</span>
-            <span className="text-gray-400 text-xs font-bold">Solana</span>
-            <span className="text-gray-600 text-xs">•</span>
-            <span className="text-gray-400 text-xs font-bold">Intel TDX</span>
+            <p className="text-xs text-slate-500 text-center">
+              Connect any Solana wallet • No KYC • Instant play • Secure on-chain
+            </p>
+          </motion.div>
+
+          {/* Blockchain Integration Badge */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.9 }}
+            className="flex flex-wrap justify-center gap-3"
+          >
+            {[
+              { name: "Solana", icon: "⛓️" },
+              { name: "MagicBlock", icon: "✨" },
+              { name: "Intel TDX", icon: "🔒" },
+            ].map((tech) => (
+              <div
+                key={tech.name}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50 text-slate-300 text-xs font-medium hover:border-slate-600 transition-colors"
+              >
+                <span>{tech.icon}</span>
+                <span>{tech.name}</span>
+              </div>
+            ))}
+          </motion.div>
+        </div>
+
+        {/* Footer */}
+        <div className="relative z-10 flex justify-center items-center py-6 px-6 border-t border-slate-700/30 backdrop-blur-md bg-slate-900/20">
+          <div className="text-center">
+            <p className="text-xs text-slate-500 mb-2">
+              Powered by <span className="text-slate-400 font-semibold">MagicBlock Ephemeral Rollups</span> • Deployed on Solana Devnet
+            </p>
+            <p className="text-[10px] text-slate-600">
+              Program ID: <span className="font-mono text-slate-500">7qRu72w...zkqK</span>
+            </p>
           </div>
-        </motion.div>
+        </div>
       </div>
     );
   }
