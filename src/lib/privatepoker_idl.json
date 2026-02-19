@@ -64,6 +64,59 @@
       ]
     },
     {
+      "name": "cancel_game",
+      "docs": [
+        "Cancel a game that hasn't started yet — Player 1 gets full refund",
+        "Can only be called when game is in WaitingForPlayer phase (no opponent joined)"
+      ],
+      "discriminator": [
+        121,
+        194,
+        154,
+        118,
+        103,
+        235,
+        149,
+        52
+      ],
+      "accounts": [
+        {
+          "name": "game",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  107,
+                  101,
+                  114,
+                  95,
+                  103,
+                  97,
+                  109,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "game.game_id",
+                "account": "Game"
+              }
+            ]
+          }
+        },
+        {
+          "name": "player1",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claim_bet_winnings",
       "docs": [
         "🔟 Claim winnings from betting pool"
@@ -957,6 +1010,90 @@
       ]
     },
     {
+      "name": "refund_bet",
+      "docs": [
+        "Refund a bet from a settled betting pool where the bettor lost",
+        "Losing bettors get nothing back (this is by design — winner takes the pool)",
+        "BUT if the pool was never settled (game abandoned), bettors can reclaim their SOL"
+      ],
+      "discriminator": [
+        209,
+        182,
+        226,
+        96,
+        55,
+        121,
+        83,
+        183
+      ],
+      "accounts": [
+        {
+          "name": "betting_pool",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116,
+                  116,
+                  105,
+                  110,
+                  103,
+                  95,
+                  112,
+                  111,
+                  111,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bet",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "game_id"
+              },
+              {
+                "kind": "account",
+                "path": "bettor"
+              }
+            ]
+          }
+        },
+        {
+          "name": "bettor",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "_game_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "reveal_winner",
       "docs": [
         "6️⃣ Reveal winner and commit state back to Solana L1 via MagicBlock ER",
@@ -1207,11 +1344,6 @@
         {
           "name": "loser",
           "writable": true
-        },
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
         }
       ],
       "args": [

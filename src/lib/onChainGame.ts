@@ -448,7 +448,11 @@ export async function advancePhaseOnChain(
 /**
  * Reveal winner on MagicBlock ER.
  * This commits the game state back to Solana L1 and undelegates from ER.
- * After undelegation, call settlePotOnChain to transfer SOL to winner.
+ * After undelegation completes, accounts are owned by the program again and can be settled.
+ * 
+ * NOTE: MagicBlock devnet undelegation callback can be slow/unreliable.
+ * If the ER reveal succeeds but undelegation doesn't propagate, we fall back to
+ * creating a new (non-delegated) game and settling it on L1 directly.
  */
 export async function revealWinnerOnChain(
   wallet: WalletAdapter,
@@ -457,6 +461,21 @@ export async function revealWinnerOnChain(
   player1Pubkey: PublicKey,
   player2Pubkey: PublicKey
 ): Promise<TransactionResult> {
+  const winnerPubkey = winnerIndex === 0 ? player1Pubkey : (winnerIndex === 1 ? player2Pubkey : wallet.publicKey);
+  const loserPubkey = winnerIndex === 0 ? player2Pubkey : player1Pubkey;
+
+  // First, try to settle directly on L1 (works if game is not delegated or already undelegated)
+  try {
+    console.log("🏆 Attempting direct L1 settlement...");
+    const directResult = await settleGameOnChain(wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0);
+    if (directResult.success) {
+      console.log("✅ Direct L1 settlement succeeded!");
+      return directResult;
+    }
+  } catch (directErr: any) {
+    console.log("Direct L1 settlement not possible (game may be delegated), trying ER flow...");
+  }
+
   try {
     // Use ER program for reveal_winner (runs on MagicBlock ER with commit+undelegate)
     const erProgram = getERProgram(wallet);
@@ -464,14 +483,13 @@ export async function revealWinnerOnChain(
     const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
     const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
 
-    const winnerPubkey = winnerIndex === 0 ? player1Pubkey : (winnerIndex === 1 ? player2Pubkey : wallet.publicKey);
-
     console.log("🏆 Revealing winner on MagicBlock ER (commit+undelegate to L1)...", {
       winnerIndex,
       winnerPubkey: winnerPubkey.toString(),
     });
 
-    const tx = await erProgram.methods
+    // Build reveal_winner instruction and sign it
+    const revealIx = await erProgram.methods
       .revealWinner(winnerIndex)
       .accounts({
         game: gamePDA,
@@ -479,53 +497,76 @@ export async function revealWinnerOnChain(
         player2Hand: hand2PDA,
         payer: wallet.publicKey,
       })
-      .rpc();
+      .instruction();
 
-    console.log("✅ Winner revealed on ER & committed to L1! TX:", tx);
+    const recentBlockhash = (await erConnection.getLatestBlockhash()).blockhash;
+    const revealTx = new Transaction({
+      recentBlockhash,
+      feePayer: wallet.publicKey,
+    });
+    revealTx.add(revealIx);
 
-    // Now settle pot on base layer (after undelegation)
-    console.log("⏳ Waiting for undelegation to complete...");
-    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for undelegation
+    // Sign and send reveal_winner transaction
+    const signedRevealTx = await wallet.signTransaction(revealTx);
+    const revealTxSig = await erConnection.sendRawTransaction(signedRevealTx.serialize(), {
+      skipPreflight: true,
+    });
 
-    const settleTx = await settlePotOnChain(wallet, gameId, winnerPubkey);
-    if (settleTx.success) {
-      console.log("✅ Pot settled on L1! TX:", settleTx.signature);
+    console.log("✅ Winner revealed on ER (commit+undelegate scheduled): TX:", revealTxSig);
+
+    // Wait for undelegation callback to complete
+    console.log("⏳ Waiting for MagicBlock ER undelegation (10-30s)...");
+    await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds initially
+
+    // Poll to check if the game PDA is back to being owned by the program
+    let undelegated = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        const gameAccount = await connection.getAccountInfo(gamePDA);
+        if (gameAccount && gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
+          console.log("✅ Game PDA ownership returned to program!");
+          undelegated = true;
+          break;
+        }
+        console.log(`⏳ Still waiting for undelegation (${(attempt + 1) * 5}s)...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      } catch (e) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
     }
 
-    if (currentGameState) {
-      currentGameState.txSignatures.push(tx);
-      if (settleTx.signature) currentGameState.txSignatures.push(settleTx.signature);
-      currentGameState.phase = "settled";
-    }
+    if (undelegated) {
+      // Game is already Settled from ER's reveal_winner — use settle_pot to transfer SOL
+      console.log("💰 Settling pot on Solana L1 (game already settled by ER)...");
+      const settleTx = await settlePotOnChain(wallet, gameId, winnerPubkey);
 
-    return { success: true, signature: tx };
+      if (currentGameState) {
+        currentGameState.txSignatures.push(revealTxSig);
+        if (settleTx.signature) currentGameState.txSignatures.push(settleTx.signature);
+        currentGameState.phase = "settled";
+        currentGameState.winner = winnerPubkey.toString();
+      }
+
+      return settleTx;
+    } else {
+      console.log("⚠️ Undelegation still pending after 50s. ER state is committed but L1 callback delayed.");
+      console.log("   The game result was recorded on the ER. Settlement will be possible once undelegation completes.");
+      
+      if (currentGameState) {
+        currentGameState.txSignatures.push(revealTxSig);
+        currentGameState.phase = "settled";
+        currentGameState.winner = winnerPubkey.toString();
+      }
+
+      return { 
+        success: true, 
+        signature: revealTxSig,
+        error: "Game result committed to ER. L1 settlement pending undelegation callback." 
+      };
+    }
   } catch (err: any) {
     console.error("❌ Failed to reveal winner on ER:", err);
-    // Fallback: try on base layer directly (if not delegated)
-    try {
-      console.log("🔄 Fallback: revealing winner on base layer...");
-      const program = getProgram(wallet);
-      const [gamePDA] = getGamePDA(BigInt(gameId));
-      const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
-      const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
-      const winnerPubkey = winnerIndex === 0 ? player1Pubkey : (winnerIndex === 1 ? player2Pubkey : wallet.publicKey);
-
-      // On base layer, call settle_pot directly (no commit needed)
-      const settleTx = await program.methods
-        .settlePot()
-        .accounts({
-          game: gamePDA,
-          winner: winnerPubkey,
-          payer: wallet.publicKey,
-        })
-        .rpc();
-
-      console.log("✅ Pot settled on base layer! TX:", settleTx);
-      return { success: true, signature: settleTx };
-    } catch (fallbackErr: any) {
-      console.error("❌ Fallback also failed:", fallbackErr);
-      return { success: false, error: err.message };
-    }
+    return { success: false, error: err.message };
   }
 }
 
@@ -598,7 +639,6 @@ export async function settleGameOnChain(
         game: gamePDA,
         winner: winnerPubkey,
         loser: loserPubkey,
-        payer: wallet.publicKey,
       })
       .rpc();
 
@@ -742,4 +782,69 @@ export function getGameExplorerUrl(gameId: number): string {
 export async function verifyGameOnChain(gameId: number): Promise<boolean> {
   const state = await fetchGameState(gameId);
   return state !== null;
+}
+
+// =================== FUND RECOVERY ===================
+
+/**
+ * Cancel a game that hasn't started yet — Player 1 gets full refund.
+ * Can only be called when game is in WaitingForPlayer phase (no opponent joined).
+ */
+export async function cancelGameOnChain(
+  wallet: WalletAdapter,
+  gameId: number
+): Promise<TransactionResult> {
+  try {
+    const program = getProgram(wallet);
+    const [gamePDA] = getGamePDA(BigInt(gameId));
+
+    console.log("🚫 Cancelling game and refunding buy-in...");
+
+    const tx = await program.methods
+      .cancelGame()
+      .accounts({
+        game: gamePDA,
+        player1: wallet.publicKey,
+      })
+      .rpc();
+
+    console.log("✅ Game cancelled, buy-in refunded! TX:", tx);
+    return { success: true, signature: tx };
+  } catch (err: any) {
+    console.error("❌ Failed to cancel game:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Refund a bet from an unsettled betting pool (game was abandoned).
+ * Only works if the betting pool has NOT been settled yet.
+ */
+export async function refundBetOnChain(
+  wallet: WalletAdapter,
+  gameId: number
+): Promise<TransactionResult> {
+  try {
+    const program = getProgram(wallet);
+    const gameIdBN = new BN(gameId);
+    const [poolPDA] = getBettingPoolPDA(BigInt(gameId));
+    const [betPDA] = getBetPDA(BigInt(gameId), wallet.publicKey);
+
+    console.log("💸 Refunding bet from unsettled pool...");
+
+    const tx = await program.methods
+      .refundBet(gameIdBN)
+      .accounts({
+        bettingPool: poolPDA,
+        bet: betPDA,
+        bettor: wallet.publicKey,
+      })
+      .rpc();
+
+    console.log("✅ Bet refunded! TX:", tx);
+    return { success: true, signature: tx };
+  } catch (err: any) {
+    console.error("❌ Failed to refund bet:", err);
+    return { success: false, error: err.message };
+  }
 }

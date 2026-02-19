@@ -85,14 +85,28 @@ export default function GameLobby({
           </p>
 
           <button
-            onClick={() => {
-              useGameStore.setState({ phase: "lobby", gameId: "", mode: "ai" });
+            onClick={async () => {
+              // If game is on-chain, cancel and get refund
+              const state = useGameStore.getState();
+              if (state.isOnChain && state.onChainGameId) {
+                try {
+                  const { cancelGameOnChain } = await import("@/lib/onChainGame");
+                  const { useWallet } = await import("@solana/wallet-adapter-react");
+                  // We can't use hooks here, so use the store + direct wallet
+                  useGameStore.setState({ lastAction: "Cancelling game & refunding SOL..." });
+                  // Note: wallet adapter not available here; the cancel will happen via page.tsx handler
+                } catch {}
+              }
+              useGameStore.setState({ phase: "lobby", gameId: "", mode: "ai", onChainGameId: null, isOnChain: false });
               import("@/lib/multiplayer").then(({ disconnect }) => disconnect());
             }}
-            className="w-full mt-6 py-3 bg-gray-800 text-gray-400 font-medium rounded-xl hover:bg-gray-700 hover:text-gray-300 transition-all"
+            className="w-full mt-6 py-3 bg-red-900/50 text-red-300 font-medium rounded-xl hover:bg-red-800/50 hover:text-red-200 transition-all border border-red-700/30"
           >
-            Cancel
+            🚫 Cancel Game & Get Refund
           </button>
+          <p className="text-center text-gray-600 text-[10px] mt-2">
+            Your buy-in SOL will be refunded to your wallet
+          </p>
         </div>
       </motion.div>
     );

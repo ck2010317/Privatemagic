@@ -17,6 +17,8 @@ import {
   revealWinnerOnChain,
   settlePotOnChain,
   settleGameOnChain,
+  cancelGameOnChain,
+  refundBetOnChain,
   fetchGameState,
   getWalletBalance,
   getExplorerUrl,
@@ -369,6 +371,30 @@ export default function Home() {
     });
   };
 
+  // Cancel a game that hasn't started (Player 2 never joined) — refund Player 1
+  const handleCancelGame = async () => {
+    if (!publicKey || !onChainGameId) return;
+    const wallet = getWalletAdapter();
+    if (!wallet) return;
+
+    useGameStore.setState({ txPending: true, txError: null, lastAction: "Cancelling game & refunding..." });
+
+    const result = await cancelGameOnChain(wallet, onChainGameId);
+    if (result.success) {
+      useGameStore.getState().addTransaction({
+        type: "cancel",
+        signature: result.signature!,
+        description: "Game cancelled — buy-in refunded",
+        timestamp: Date.now(),
+      });
+      useGameStore.setState({ txPending: false, lastAction: "✅ Game cancelled, SOL refunded!" });
+      // Wait a moment then go back to lobby
+      setTimeout(() => handleBackToLobby(), 2000);
+    } else {
+      useGameStore.setState({ txPending: false, txError: result.error || "Cancel failed" });
+    }
+  };
+
   // Not connected — show connect screen
   if (!connected || !publicKey) {
     return (
@@ -494,7 +520,7 @@ export default function Home() {
               {/* Game Over buttons */}
               {(phase === "settled" || phase === "showdown") && (
                 <div className="flex flex-col items-center gap-4 mt-6">
-                  {/* Claim Winnings button — only shown to the winner if on-chain and not yet settled */}
+                  {/* Claim Winnings button — ALWAYS shown to the winner until claimed */}
                   {isOnChain && onChainGameId && winner && publicKey && (() => {
                     const isWinner = (myPlayerIndex === 0 && winner === player1?.publicKey) || 
                                      (myPlayerIndex === 1 && winner === player2?.publicKey);
@@ -507,18 +533,23 @@ export default function Home() {
                     }
                     if (isWinner && !settledOnChain) {
                       return (
-                        <motion.button
-                          initial={{ opacity: 0, scale: 0.8 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          transition={{ delay: 1, type: "spring" }}
-                          onClick={handleClaimWinnings}
-                          disabled={txPending}
-                          className="px-10 py-4 bg-gradient-to-r from-green-400 to-emerald-500 text-black font-black
-                            rounded-2xl text-xl hover:from-green-300 hover:to-emerald-400 transition-all
-                            shadow-lg shadow-green-500/30 animate-pulse disabled:opacity-50 disabled:animate-none"
-                        >
-                          {txPending ? "⏳ Claiming..." : `💰 Claim ${lamportsToSol(pot)} SOL Winnings`}
-                        </motion.button>
+                        <div className="flex flex-col items-center gap-2">
+                          <motion.button
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            transition={{ delay: 1, type: "spring" }}
+                            onClick={handleClaimWinnings}
+                            disabled={txPending}
+                            className="px-10 py-4 bg-gradient-to-r from-green-400 to-emerald-500 text-black font-black
+                              rounded-2xl text-xl hover:from-green-300 hover:to-emerald-400 transition-all
+                              shadow-lg shadow-green-500/30 animate-pulse disabled:opacity-50 disabled:animate-none"
+                          >
+                            {txPending ? "⏳ Claiming..." : `💰 Claim ${lamportsToSol(pot)} SOL Winnings`}
+                          </motion.button>
+                          <p className="text-yellow-400/80 text-xs font-medium animate-pulse">
+                            ⚠️ You must claim your winnings before leaving!
+                          </p>
+                        </div>
                       );
                     }
                     return null;
