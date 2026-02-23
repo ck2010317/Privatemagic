@@ -1,73 +1,65 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 
-// ─── Table of Contents Sections ─────────────────────────
+// ─── TOC ────────────────────────────────────────────────
 const TOC = [
-  { id: "overview", title: "Architecture Overview" },
-  { id: "connection", title: "Connection Details" },
-  { id: "protocol", title: "WebSocket Protocol" },
+  { id: "overview", title: "Architecture" },
+  { id: "connection", title: "Connection" },
   { id: "flow", title: "Game Flow" },
-  { id: "client-messages", title: "Client → Server Messages" },
-  { id: "server-messages", title: "Server → Client Messages" },
-  { id: "state", title: "Game State Object" },
+  { id: "client-msgs", title: "Client → Server" },
+  { id: "server-msgs", title: "Server → Client" },
+  { id: "state-object", title: "State Object" },
   { id: "actions", title: "Player Actions" },
   { id: "cards", title: "Card Format" },
   { id: "hands", title: "Hand Rankings" },
-  { id: "onchain", title: "On-Chain Integration" },
-  { id: "betting", title: "Betting System" },
-  { id: "example", title: "Complete Example" },
-  { id: "ai-reference", title: "AI Decision Reference" },
-  { id: "errors", title: "Error Handling" },
+  { id: "onchain", title: "On-Chain (Solana)" },
+  { id: "example", title: "Full Example" },
+  { id: "ai-ref", title: "AI Reference" },
+  { id: "errors", title: "Errors & Lifecycle" },
   { id: "quickstart", title: "Quick Start" },
 ];
 
-function CodeBlock({ children, language }: { children: string; language?: string }) {
+// ─── Components ─────────────────────────────────────────
+function Code({ children, lang }: { children: string; lang?: string }) {
   const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard.writeText(children);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
   return (
-    <div className="relative group my-4">
-      <button
-        onClick={copy}
-        className="absolute top-3 right-3 px-2 py-1 text-[10px] bg-slate-700/50 text-slate-400 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-slate-600/50"
-      >
-        {copied ? "✓ Copied" : "Copy"}
-      </button>
-      {language && (
-        <span className="absolute top-3 left-4 text-[10px] text-slate-500 uppercase tracking-wider">{language}</span>
-      )}
-      <pre className="bg-slate-900/80 border border-slate-700/50 rounded-xl p-4 pt-8 overflow-x-auto text-sm font-mono text-slate-300 leading-relaxed">
-        {children}
-      </pre>
+    <div className="relative group my-5 rounded-xl overflow-hidden border border-slate-700/40 bg-[#0d1117]">
+      <div className="flex items-center justify-between px-4 py-2 bg-slate-800/60 border-b border-slate-700/30">
+        <span className="text-[11px] text-slate-500 font-mono uppercase tracking-wider">{lang || "code"}</span>
+        <button
+          onClick={() => { navigator.clipboard.writeText(children); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+          className="text-[11px] px-2.5 py-1 rounded-md bg-slate-700/40 text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 transition-all"
+        >
+          {copied ? "✓ Copied!" : "Copy"}
+        </button>
+      </div>
+      <pre className="p-4 overflow-x-auto text-[13px] font-mono text-slate-300 leading-relaxed">{children}</pre>
     </div>
   );
 }
 
-function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
+function T({ headers, rows }: { headers: string[]; rows: (string | React.ReactNode)[][] }) {
   return (
-    <div className="overflow-x-auto my-4">
-      <table className="w-full text-sm border-collapse">
+    <div className="overflow-x-auto my-5 rounded-xl border border-slate-700/40">
+      <table className="w-full text-sm">
         <thead>
-          <tr>
+          <tr className="bg-slate-800/50">
             {headers.map((h, i) => (
-              <th key={i} className="text-left px-4 py-3 bg-slate-800/60 border border-slate-700/50 text-slate-300 font-semibold text-xs uppercase tracking-wider">
-                {h}
-              </th>
+              <th key={i} className="text-left px-4 py-3 text-[11px] text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-700/30">{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row, ri) => (
-            <tr key={ri} className="hover:bg-slate-800/30 transition-colors">
+            <tr key={ri} className="border-b border-slate-800/30 hover:bg-slate-800/20 transition-colors">
               {row.map((cell, ci) => (
-                <td key={ci} className="px-4 py-2.5 border border-slate-700/30 text-slate-400">
-                  <span dangerouslySetInnerHTML={{ __html: cell.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 bg-slate-800 text-amber-300 rounded text-xs font-mono">$1</code>') }} />
+                <td key={ci} className="px-4 py-2.5 text-slate-400">
+                  {typeof cell === "string" ? (
+                    <span dangerouslySetInnerHTML={{ __html: cell.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 bg-slate-800/80 text-amber-300/90 rounded text-xs font-mono">$1</code>') }} />
+                  ) : cell}
                 </td>
               ))}
             </tr>
@@ -78,332 +70,455 @@ function Table({ headers, rows }: { headers: string[]; rows: string[][] }) {
   );
 }
 
-function SectionHeader({ id, number, title }: { id: string; number: number; title: string }) {
+function Sec({ id, n, title }: { id: string; n: number; title: string }) {
   return (
-    <h2 id={id} className="text-2xl font-black mt-16 mb-6 flex items-center gap-3 scroll-mt-24">
-      <span className="flex items-center justify-center w-8 h-8 bg-gradient-to-br from-amber-500 to-orange-600 text-black text-sm font-black rounded-lg">
-        {number}
+    <h2 id={id} className="text-2xl font-black mt-20 mb-6 flex items-center gap-3 scroll-mt-24 group">
+      <span className="flex items-center justify-center w-9 h-9 bg-gradient-to-br from-amber-500 to-orange-600 text-black text-sm font-black rounded-lg shadow-lg shadow-amber-500/20">
+        {n}
       </span>
-      <span className="bg-clip-text text-transparent bg-gradient-to-r from-slate-100 to-slate-300">{title}</span>
+      <span className="text-slate-100">{title}</span>
+      <a href={`#${id}`} className="opacity-0 group-hover:opacity-100 text-slate-600 transition-opacity">#</a>
     </h2>
   );
 }
 
-function Badge({ children, color = "amber" }: { children: React.ReactNode; color?: string }) {
-  const colors: Record<string, string> = {
+function Pill({ children, c = "amber" }: { children: React.ReactNode; c?: string }) {
+  const m: Record<string, string> = {
     amber: "bg-amber-500/10 text-amber-300 border-amber-500/20",
     green: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
     blue: "bg-blue-500/10 text-blue-300 border-blue-500/20",
     red: "bg-red-500/10 text-red-300 border-red-500/20",
     purple: "bg-purple-500/10 text-purple-300 border-purple-500/20",
+    cyan: "bg-cyan-500/10 text-cyan-300 border-cyan-500/20",
   };
+  return <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-semibold border ${m[c]}`}>{children}</span>;
+}
+
+function Callout({ children, type = "info" }: { children: React.ReactNode; type?: "info" | "warn" | "success" | "tip" }) {
+  const styles = {
+    info: "bg-blue-500/5 border-blue-500/20 text-blue-300",
+    warn: "bg-amber-500/5 border-amber-500/20 text-amber-300",
+    success: "bg-emerald-500/5 border-emerald-500/20 text-emerald-300",
+    tip: "bg-purple-500/5 border-purple-500/20 text-purple-300",
+  };
+  const icons = { info: "ℹ️", warn: "⚠️", success: "✅", tip: "💡" };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-xs font-mono border ${colors[color]}`}>
-      {children}
-    </span>
+    <div className={`p-4 rounded-xl border text-sm ${styles[type]} my-4 flex gap-3`}>
+      <span className="text-base flex-shrink-0">{icons[type]}</span>
+      <div>{children}</div>
+    </div>
   );
 }
 
+// ─── Architecture Diagram ───────────────────────────────
+function ArchDiagram() {
+  return (
+    <div className="my-6 p-6 md:p-8 bg-[#0d1117] rounded-2xl border border-slate-700/40 overflow-hidden">
+      <div className="flex flex-col items-center gap-0">
+        {/* Top: Clients */}
+        <div className="flex gap-8 md:gap-16 justify-center w-full mb-1">
+          <div className="flex flex-col items-center">
+            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/10 border border-purple-500/30 flex items-center justify-center text-2xl">🤖</div>
+            <span className="text-xs text-purple-300 font-semibold mt-2">AI Agent</span>
+            <span className="text-[10px] text-slate-500">Your Bot</span>
+          </div>
+          <div className="flex flex-col items-center">
+            <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/10 border border-blue-500/30 flex items-center justify-center text-2xl">🧑‍💻</div>
+            <span className="text-xs text-blue-300 font-semibold mt-2">Human</span>
+            <span className="text-[10px] text-slate-500">Browser</span>
+          </div>
+        </div>
+        
+        {/* Arrows down */}
+        <div className="flex gap-8 md:gap-16 justify-center w-full">
+          <div className="flex flex-col items-center">
+            <div className="w-px h-6 bg-gradient-to-b from-purple-500/50 to-amber-500/50" />
+          </div>
+          <div className="flex flex-col items-center">
+            <div className="w-px h-6 bg-gradient-to-b from-blue-500/50 to-amber-500/50" />
+          </div>
+        </div>
+
+        {/* Connection label */}
+        <div className="px-4 py-1.5 rounded-full bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300 font-mono mb-1">
+          WebSocket · JSON · wss://privatemagic.onrender.com
+        </div>
+        <div className="w-px h-4 bg-amber-500/30" />
+
+        {/* Server */}
+        <div className="w-full max-w-sm p-5 rounded-2xl bg-gradient-to-b from-amber-500/5 to-transparent border border-amber-500/20 relative">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">⚡</span>
+            <span className="text-sm font-bold text-amber-200">Game Server</span>
+            <span className="text-[10px] text-slate-500 ml-auto">Node.js</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-[11px]">
+            {["Room Management", "Card Dealing", "Action Validation", "Hand Evaluation", "Phase Advancement", "Winner Resolution"].map((f) => (
+              <div key={f} className="px-2.5 py-1.5 rounded-lg bg-slate-800/40 text-slate-400 border border-slate-700/20">{f}</div>
+            ))}
+          </div>
+        </div>
+
+        <div className="w-px h-4 bg-emerald-500/30" />
+        <div className="px-4 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-300 font-mono mb-1">
+          Optional · Solana RPC
+        </div>
+        <div className="w-px h-4 bg-emerald-500/30" />
+
+        {/* Blockchain */}
+        <div className="w-full max-w-sm p-5 rounded-2xl bg-gradient-to-b from-emerald-500/5 to-transparent border border-emerald-500/20">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-lg">⛓️</span>
+            <span className="text-sm font-bold text-emerald-200">Solana + MagicBlock ER</span>
+            <span className="text-[10px] text-slate-500 ml-auto">Devnet</span>
+          </div>
+          <div className="grid grid-cols-3 gap-2 text-[11px]">
+            {["SOL Escrow", "Winner Payout", "MagicBlock ER"].map((f) => (
+              <div key={f} className="px-2.5 py-1.5 rounded-lg bg-slate-800/40 text-slate-400 border border-slate-700/20 text-center">{f}</div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Flow Diagram ───────────────────────────────────────
+function FlowDiagram() {
+  const phases = [
+    { name: "Create", icon: "🏗️", sub: "P1 creates room" },
+    { name: "Waiting", icon: "⏳", sub: "P2 joins" },
+    { name: "Preflop", icon: "🎴", sub: "2 hole cards" },
+    { name: "Flop", icon: "🃏", sub: "3 community" },
+    { name: "Turn", icon: "🃏", sub: "4 community" },
+    { name: "River", icon: "🃏", sub: "5 community" },
+    { name: "Showdown", icon: "🏆", sub: "Evaluate hands" },
+    { name: "Settled", icon: "✅", sub: "Winner decided" },
+  ];
+  return (
+    <div className="my-6 p-4 md:p-6 bg-[#0d1117] rounded-2xl border border-slate-700/40 overflow-x-auto">
+      <div className="flex items-center gap-1 min-w-[700px]">
+        {phases.map((p, i) => (
+          <div key={p.name} className="flex items-center">
+            <div className="flex flex-col items-center w-[80px]">
+              <span className="text-lg mb-1">{p.icon}</span>
+              <span className="text-[11px] font-bold text-slate-200">{p.name}</span>
+              <span className="text-[9px] text-slate-500 text-center leading-tight mt-0.5">{p.sub}</span>
+            </div>
+            {i < phases.length - 1 && (
+              <div className="w-6 h-px bg-gradient-to-r from-slate-600 to-slate-700 flex-shrink-0" />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Page ───────────────────────────────────────────────
 export default function DocsPage() {
-  const [activeSection, setActiveSection] = useState("overview");
+  const [active, setActive] = useState("overview");
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActive(entry.target.id);
+          }
+        }
+      },
+      { rootMargin: "-20% 0px -60% 0px" }
+    );
+    TOC.forEach(({ id }) => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-200">
-      {/* Header */}
-      <nav className="sticky top-0 z-50 flex justify-between items-center px-6 py-4 backdrop-blur-xl bg-slate-950/80 border-b border-slate-800/50">
-        <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-          <span className="text-2xl">🃏</span>
-          <span className="text-lg font-black bg-clip-text text-transparent bg-gradient-to-r from-amber-300 to-orange-500">
-            PRIVATE POKER
-          </span>
+      {/* Nav */}
+      <nav className="sticky top-0 z-50 flex justify-between items-center px-6 py-3.5 backdrop-blur-xl bg-slate-950/80 border-b border-slate-800/50">
+        <Link href="/" className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
+          <span className="text-xl">🃏</span>
+          <span className="text-base font-black bg-clip-text text-transparent bg-gradient-to-r from-amber-300 to-orange-500">PRIVATE POKER</span>
+          <span className="text-[10px] text-slate-600 font-mono ml-1">/ docs</span>
         </Link>
-        <div className="flex items-center gap-4">
-          <span className="text-xs text-slate-500 hidden md:block">API Documentation</span>
-          <Link
-            href="/"
-            className="px-4 py-2 text-sm bg-slate-800 text-slate-300 rounded-lg hover:bg-slate-700 transition-colors border border-slate-700/50"
-          >
-            ← Back to Game
+        <div className="flex items-center gap-3">
+          <a href="https://github.com/ck2010317/Privatemagic" target="_blank" rel="noopener noreferrer"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 rounded-lg hover:bg-slate-800/50 transition-colors">
+            GitHub ↗
+          </a>
+          <Link href="/" className="px-3.5 py-1.5 text-xs bg-amber-500/10 text-amber-300 rounded-lg hover:bg-amber-500/20 transition-colors border border-amber-500/20 font-medium">
+            Play Game →
           </Link>
         </div>
       </nav>
 
       <div className="flex">
-        {/* Sidebar TOC */}
-        <aside className="hidden lg:block w-64 sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto border-r border-slate-800/50 p-6">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-4">On this page</h3>
-          <ul className="space-y-1">
-            {TOC.map((item) => (
-              <li key={item.id}>
-                <a
-                  href={`#${item.id}`}
-                  onClick={() => setActiveSection(item.id)}
-                  className={`block text-sm px-3 py-1.5 rounded-lg transition-all ${
-                    activeSection === item.id
-                      ? "text-amber-300 bg-amber-500/10 font-medium"
-                      : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
-                  }`}
-                >
-                  {item.title}
-                </a>
-              </li>
-            ))}
-          </ul>
+        {/* Sidebar */}
+        <aside className="hidden lg:block w-56 sticky top-[53px] h-[calc(100vh-53px)] overflow-y-auto border-r border-slate-800/40 py-6 px-4">
+          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-600 mb-3 px-3">Contents</p>
+          {TOC.map(({ id, title }) => (
+            <a
+              key={id}
+              href={`#${id}`}
+              className={`block text-[13px] px-3 py-1.5 rounded-lg transition-all mb-0.5 ${
+                active === id
+                  ? "text-amber-300 bg-amber-500/10 font-medium"
+                  : "text-slate-500 hover:text-slate-300 hover:bg-slate-800/40"
+              }`}
+            >
+              {title}
+            </a>
+          ))}
         </aside>
 
-        {/* Main Content */}
-        <main className="flex-1 max-w-4xl mx-auto px-6 md:px-12 py-12">
+        {/* Content */}
+        <main className="flex-1 max-w-4xl mx-auto px-5 md:px-10 py-10">
           {/* Hero */}
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-12">
-            <div className="flex items-center gap-3 mb-4">
-              <Badge color="green">v1.0.0</Badge>
-              <Badge color="blue">Solana Devnet</Badge>
-              <Badge color="purple">WebSocket</Badge>
+          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <Pill c="green">v1.0.0</Pill>
+              <Pill c="blue">Solana Devnet</Pill>
+              <Pill c="purple">WebSocket JSON</Pill>
+              <Pill c="cyan">Heads-Up Poker</Pill>
             </div>
-            <h1 className="text-4xl md:text-5xl font-black mb-4">
-              <span className="bg-clip-text text-transparent bg-gradient-to-r from-amber-200 via-orange-300 to-red-400">
-                API Documentation
-              </span>
+            <h1 className="text-4xl md:text-5xl font-black mb-3 bg-clip-text text-transparent bg-gradient-to-r from-amber-200 via-orange-300 to-red-400">
+              API Documentation
             </h1>
-            <p className="text-lg text-slate-400 leading-relaxed max-w-2xl">
-              Everything you need to build bots, AI agents, or custom clients that connect to Private Poker.
-              The game uses a simple WebSocket JSON protocol — connect, join, and play.
+            <p className="text-base text-slate-400 leading-relaxed max-w-2xl mb-6">
+              Complete reference for building AI agents, bots, or custom clients for Private Poker.
+              Connect via WebSocket, join a game, receive state updates, and send actions.
             </p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <div className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 rounded-lg border border-slate-700/30">
-                <span className="text-xs text-slate-500">WebSocket</span>
-                <code className="text-xs text-emerald-300 font-mono">wss://privatemagic.onrender.com</code>
+            <div className="flex flex-wrap gap-3 mb-2">
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] rounded-xl border border-slate-700/30">
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">Server</span>
+                <code className="text-sm text-emerald-300 font-mono font-medium">wss://privatemagic.onrender.com</code>
               </div>
-              <div className="flex items-center gap-2 px-4 py-2 bg-slate-800/50 rounded-lg border border-slate-700/30">
-                <span className="text-xs text-slate-500">Program</span>
-                <code className="text-xs text-amber-300 font-mono">7qRu72w...zkqK</code>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] rounded-xl border border-slate-700/30">
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">Website</span>
+                <code className="text-sm text-blue-300 font-mono font-medium">https://poker.privatepay.site</code>
+              </div>
+              <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0d1117] rounded-xl border border-slate-700/30">
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">Program</span>
+                <code className="text-sm text-amber-300 font-mono font-medium text-[12px]">7qRu72wJ5AGcXkqnwXoNtkWt3Z6ZaJoyTQsEc5gzzkqK</code>
               </div>
             </div>
           </motion.div>
 
-          <hr className="border-slate-800/50 mb-8" />
+          <hr className="border-slate-800/40 my-10" />
 
-          {/* Section 1: Architecture */}
-          <SectionHeader id="overview" number={1} title="Architecture Overview" />
-          <p className="text-slate-400 mb-4">
-            Private Poker uses a <strong className="text-slate-200">WebSocket game server</strong> for real-time multiplayer, with an optional <strong className="text-slate-200">Solana on-chain layer</strong> for escrow and settlement via MagicBlock Ephemeral Rollups.
+          {/* ── 1. Architecture ── */}
+          <Sec id="overview" n={1} title="Architecture Overview" />
+          <p className="text-slate-400 mb-2">
+            Private Poker is a <strong className="text-slate-200">heads-up Texas Hold&apos;em</strong> game. AI agents connect via <strong className="text-slate-200">WebSocket</strong> and play exactly like a human player. The server deals cards, validates actions, advances phases, and determines winners — your agent just needs to join and make decisions.
           </p>
-          <CodeBlock language="diagram">{`┌──────────────────────────────────────────────────┐
-│                                                  │
-│   AI Agent / Bot         Human Player (Browser)  │
-│        │                       │                 │
-│        └── WebSocket (JSON) ──┐│                 │
-│                               ▼▼                 │
-│                    ┌──────────────────┐           │
-│                    │  WebSocket Server│           │
-│                    │  (Node.js)       │           │
-│                    │                  │           │
-│                    │ • Room mgmt     │           │
-│                    │ • Card dealing  │           │
-│                    │ • Action relay  │           │
-│                    │ • Hand eval     │           │
-│                    │ • Winner logic  │           │
-│                    └────────┬─────────┘           │
-│                             │                    │
-│                    ┌────────▼─────────┐           │
-│                    │ Solana Blockchain│           │
-│                    │ (optional)       │           │
-│                    │                  │           │
-│                    │ • SOL escrow     │           │
-│                    │ • Winner payout  │           │
-│                    │ • MagicBlock ER  │           │
-│                    └──────────────────┘           │
-│                                                  │
-└──────────────────────────────────────────────────┘`}</CodeBlock>
-          <div className="p-4 bg-emerald-500/5 border border-emerald-500/20 rounded-xl text-sm text-emerald-300 mb-6">
-            <strong>Key:</strong> Your bot interacts <strong>only via WebSocket</strong>. The server handles all card dealing, action validation, and winner determination. No Solana interaction needed for gameplay.
-          </div>
+          <Callout type="success">
+            <strong>Your bot only needs WebSocket.</strong> No Solana SDK, no wallet signing, no blockchain interaction required. Just connect, receive game state, and send actions.
+          </Callout>
+          <ArchDiagram />
 
-          {/* Section 2: Connection */}
-          <SectionHeader id="connection" number={2} title="Connection Details" />
-          <Table
-            headers={["Item", "Value"]}
+          {/* ── 2. Connection ── */}
+          <Sec id="connection" n={2} title="Connection Details" />
+          <T
+            headers={["Parameter", "Value"]}
             rows={[
               ["WebSocket URL", "`wss://privatemagic.onrender.com`"],
-              ["Protocol", "Standard WebSocket (RFC 6455)"],
-              ["Message Format", "JSON (UTF-8)"],
-              ["Keep-Alive", "Send `{\"type\":\"ping\"}` every 25s"],
-              ["Connection Timeout", "15 seconds"],
-              ["Disconnect Forfeit", "60 seconds without reconnection"],
+              ["Protocol", "WebSocket (RFC 6455) over TLS"],
+              ["Message Format", "JSON strings (UTF-8)"],
+              ["Keep-Alive", "Send `{\"type\":\"ping\"}` every 25 seconds"],
+              ["Timeout", "15 seconds to establish connection"],
+              ["Disconnect Penalty", "60s without reconnect = forfeit (opponent wins)"],
+              ["Room Expiry", "1 hour after creation"],
             ]}
           />
+          <Code lang="javascript">{`// Connect
+const ws = new WebSocket("wss://privatemagic.onrender.com");
 
-          {/* Section 3: Protocol */}
-          <SectionHeader id="protocol" number={3} title="WebSocket Protocol" />
-          <p className="text-slate-400 mb-4">All messages are JSON objects with a <code className="px-1.5 py-0.5 bg-slate-800 text-amber-300 rounded text-xs font-mono">type</code> field.</p>
-          <div className="grid md:grid-cols-2 gap-4 mb-6">
-            <div>
-              <h4 className="text-sm font-bold text-slate-300 mb-2">Sending</h4>
-              <CodeBlock language="javascript">{`ws.send(JSON.stringify({ 
-  type: "<message_type>", 
-  ...params 
-}));`}</CodeBlock>
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-slate-300 mb-2">Receiving</h4>
-              <CodeBlock language="javascript">{`ws.onmessage = (event) => {
-  const msg = JSON.parse(event.data);
-  // msg.type = "state" | "created" 
-  //           | "joined" | "error" | "pong"
-};`}</CodeBlock>
-            </div>
-          </div>
+// Keep-alive (send every 25 seconds)
+setInterval(() => ws.send(JSON.stringify({ type: "ping" })), 25000);
 
-          {/* Section 4: Game Flow */}
-          <SectionHeader id="flow" number={4} title="Game Flow" />
-          <CodeBlock language="diagram">{`Create → Waiting → Preflop → Flop → Turn → River → Showdown → Settled
-  P1      P2 joins   Blinds   3 cards  4 cards  5 cards  Evaluate   Done
- creates              posted   revealed revealed revealed  winner    rematch?`}</CodeBlock>
-          <div className="space-y-3 mt-4">
+// All messages are JSON
+ws.onmessage = (e) => {
+  const msg = JSON.parse(e.data);
+  console.log(msg.type, msg);
+};`}</Code>
+
+          {/* ── 3. Game Flow ── */}
+          <Sec id="flow" n={3} title="Game Flow" />
+          <FlowDiagram />
+          <div className="space-y-2.5 mt-4">
             {[
-              { step: "1", text: "Player 1 sends `create` → receives `created` with room code" },
-              { step: "2", text: "Player 2 sends `join` with room code → receives `joined`" },
-              { step: "3", text: "Server auto-deals cards after ~1.5 seconds" },
-              { step: "4", text: "Both players receive `state` updates with phase `preflop`" },
-              { step: "5", text: "Players take turns sending `action` (fold/check/call/raise/allin)" },
-              { step: "6", text: "Server advances phases automatically when betting rounds complete" },
-              { step: "7", text: "At showdown, server evaluates hands and determines winner" },
-              { step: "8", text: "Game reaches `settled` — players can `rematch` or disconnect" },
-            ].map((item) => (
-              <div key={item.step} className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-amber-500/10 text-amber-300 text-xs font-bold rounded-full border border-amber-500/20">
-                  {item.step}
-                </span>
-                <p className="text-sm text-slate-400" dangerouslySetInnerHTML={{ __html: item.text.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 bg-slate-800 text-amber-300 rounded text-xs font-mono">$1</code>') }} />
+              ["1", "Player 1 sends `create` → receives `created` with a 5-character room code"],
+              ["2", "Player 2 (your agent) sends `join` with that room code → receives `joined`"],
+              ["3", "Server automatically deals cards ~1.5 seconds after Player 2 joins"],
+              ["4", "Both players receive `state` messages. Phase is now `preflop`"],
+              ["5", "Players take turns sending `action` messages (`fold` / `check` / `call` / `raise` / `allin`)"],
+              ["6", "Server auto-advances phases when a betting round completes (preflop → flop → turn → river)"],
+              ["7", "After the river betting round, server evaluates hands → `showdown`"],
+              ["8", "Server resolves winner → `settled`. Players can send `rematch` or disconnect"],
+            ].map(([step, text]) => (
+              <div key={step} className="flex items-start gap-3">
+                <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-amber-500/10 text-amber-300 text-xs font-bold rounded-full border border-amber-500/20 mt-0.5">{step}</span>
+                <p className="text-sm text-slate-400" dangerouslySetInnerHTML={{ __html: text.replace(/`([^`]+)`/g, '<code class="px-1.5 py-0.5 bg-slate-800/80 text-amber-300/90 rounded text-xs font-mono">$1</code>') }} />
               </div>
             ))}
           </div>
-          <div className="mt-6 p-4 bg-slate-800/30 border border-slate-700/30 rounded-xl text-sm text-slate-400">
-            <strong className="text-slate-300">Heads-Up Rules:</strong> 2 players only. Small blind = 2% of buy-in. Big blind = 2× small blind. Dealer acts first preflop, second post-flop.
-          </div>
+          <Callout type="info">
+            <strong>Heads-Up Rules:</strong> 2 players only. Small blind = 2% of buy-in (minimum 1 lamport). Big blind = 2× small blind.
+            Dealer posts small blind and acts first preflop, but acts second in all post-flop rounds.
+          </Callout>
 
-          {/* Section 5: Client → Server Messages */}
-          <SectionHeader id="client-messages" number={5} title="Client → Server Messages" />
+          {/* ── 4. Client → Server Messages ── */}
+          <Sec id="client-msgs" n={4} title="Client → Server Messages" />
+          <p className="text-slate-400 mb-6">There are 7 message types your agent can send. The most important are <code className="px-1.5 py-0.5 bg-slate-800/80 text-amber-300/90 rounded text-xs font-mono">join</code> and <code className="px-1.5 py-0.5 bg-slate-800/80 text-amber-300/90 rounded text-xs font-mono">action</code>.</p>
 
           {/* create */}
-          <h3 className="text-lg font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
-            <Badge color="green">create</Badge> Create a New Game Room
+          <h3 className="text-base font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
+            <Pill c="green">create</Pill> <span>Create a New Room</span>
           </h3>
-          <CodeBlock language="json">{`{
+          <Code lang="json">{`{
   "type": "create",
   "buyIn": 100000000,
-  "publicKey": "YourSolanaPublicKeyBase58",
+  "publicKey": "YourSolanaWalletPubkey",
   "name": "MyBot",
   "onChainGameId": null
-}`}</CodeBlock>
-          <Table
+}`}</Code>
+          <T
             headers={["Field", "Type", "Required", "Description"]}
             rows={[
-              ["`type`", '`"create"`', "✅", "Message type"],
-              ["`buyIn`", "`number`", "✅", "Buy-in in **lamports** (1 SOL = 1,000,000,000)"],
-              ["`publicKey`", "`string`", "✅", "Solana wallet public key (Base58)"],
-              ["`name`", "`string`", "✅", "Display name"],
-              ["`onChainGameId`", "`number | null`", "❌", "On-chain game ID if created on Solana first"],
+              ["`type`", "`\"create\"`", "✅", "Message type"],
+              ["`buyIn`", "`number`", "✅", "Buy-in amount in lamports (1 SOL = 1,000,000,000 lamports)"],
+              ["`publicKey`", "`string`", "✅", "Any unique identifier string (Solana pubkey or custom ID)"],
+              ["`name`", "`string`", "✅", "Display name shown during the game"],
+              ["`onChainGameId`", "`number|null`", "❌", "Only if game was created on Solana first"],
             ]}
           />
 
           {/* join */}
-          <h3 className="text-lg font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
-            <Badge color="green">join</Badge> Join an Existing Room
+          <h3 className="text-base font-bold text-slate-200 mt-10 mb-3 flex items-center gap-2">
+            <Pill c="green">join</Pill> <span>Join an Existing Room</span>
           </h3>
-          <CodeBlock language="json">{`{
+          <Code lang="json">{`{
   "type": "join",
-  "roomCode": "ABC12",
-  "publicKey": "YourSolanaPublicKeyBase58",
+  "roomCode": "XK9P3",
+  "publicKey": "YourSolanaWalletPubkey",
   "name": "MyBot"
-}`}</CodeBlock>
-          <Table
+}`}</Code>
+          <T
             headers={["Field", "Type", "Required", "Description"]}
             rows={[
-              ["`type`", '`"join"`', "✅", "Message type"],
-              ["`roomCode`", "`string`", "✅", "5-character room code (case-insensitive)"],
-              ["`publicKey`", "`string`", "✅", "Solana wallet public key (Base58)"],
+              ["`type`", "`\"join\"`", "✅", "Message type"],
+              ["`roomCode`", "`string`", "✅", "5-character room code (case-insensitive, server uppercases it)"],
+              ["`publicKey`", "`string`", "✅", "Unique identifier for this player"],
               ["`name`", "`string`", "✅", "Display name"],
             ]}
           />
-          <div className="p-3 bg-blue-500/5 border border-blue-500/20 rounded-xl text-xs text-blue-300 mt-2">
-            If the room already has 2 players, you join as a <strong>spectator</strong> (playerIndex: -1). Spectators cannot perform actions.
-          </div>
+          <Callout type="info">If the room already has 2 players, you join as a <strong>spectator</strong> (playerIndex = -1). Spectators receive state updates but cannot send actions.</Callout>
 
           {/* action */}
-          <h3 className="text-lg font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
-            <Badge color="amber">action</Badge> Perform a Game Action
+          <h3 className="text-base font-bold text-slate-200 mt-10 mb-3 flex items-center gap-2">
+            <Pill c="amber">action</Pill> <span>Send a Game Action</span> <Pill c="red">★ Most Important</Pill>
           </h3>
-          <CodeBlock language="json">{`{
+          <Code lang="json">{`{
+  "type": "action",
+  "action": "call"
+}
+
+// For raise, include the total bet amount:
+{
   "type": "action",
   "action": "raise",
-  "raiseAmount": 5000000
-}`}</CodeBlock>
-          <Table
+  "raiseAmount": 6000000
+}`}</Code>
+          <T
             headers={["Field", "Type", "Required", "Description"]}
             rows={[
-              ["`type`", '`"action"`', "✅", "Message type"],
-              ["`action`", "`string`", "✅", '`"fold"` `"check"` `"call"` `"raise"` `"allin"`'],
-              ["`raiseAmount`", "`number`", "❌", "Required for `raise`. **Total** bet amount (not increment). In lamports."],
+              ["`type`", "`\"action\"`", "✅", "Message type"],
+              ["`action`", "`string`", "✅", "One of: `\"fold\"` `\"check\"` `\"call\"` `\"raise\"` `\"allin\"`"],
+              ["`raiseAmount`", "`number`", "Only for raise", "The TOTAL bet amount (not the increment). Must be > `currentBet`. In lamports."],
+            ]}
+          />
+          <Callout type="warn">
+            <strong>raiseAmount is the TOTAL bet</strong>, not the increment. Example: if currentBet is 4,000,000 and you want to raise by 2M more, send <code className="text-amber-200">raiseAmount: 6000000</code>.
+          </Callout>
+
+          {/* bet */}
+          <h3 className="text-base font-bold text-slate-200 mt-10 mb-3 flex items-center gap-2">
+            <Pill c="purple">bet</Pill> <span>Place a Spectator Bet</span>
+          </h3>
+          <Code lang="json">{`{
+  "type": "bet",
+  "publicKey": "BettorPublicKey",
+  "name": "SpectatorName",
+  "betOnPlayer": 1,
+  "amount": 1000000
+}`}</Code>
+          <T
+            headers={["Field", "Type", "Description"]}
+            rows={[
+              ["`betOnPlayer`", "`1 | 2`", "Which player to bet on (1 = room creator, 2 = joiner)"],
+              ["`amount`", "`number`", "Bet amount in lamports"],
             ]}
           />
 
-          {/* bet */}
-          <h3 className="text-lg font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
-            <Badge color="purple">bet</Badge> Place a Spectator Bet
+          {/* rematch, delegation_complete, ping */}
+          <h3 className="text-base font-bold text-slate-200 mt-10 mb-3 flex items-center gap-2">
+            <Pill c="blue">Other Messages</Pill>
           </h3>
-          <CodeBlock language="json">{`{
-  "type": "bet",
-  "publicKey": "BettorPublicKey",
-  "name": "BettorName",
-  "betOnPlayer": 1,
-  "amount": 1000000
-}`}</CodeBlock>
+          <T
+            headers={["Message", "Payload", "Description"]}
+            rows={[
+              ["`rematch`", "`{ \"type\": \"rematch\" }`", "Request new hand. Only works in `settled` phase. Swaps dealer."],
+              ["`delegation_complete`", "`{ \"type\": \"delegation_complete\" }`", "Notify server that MagicBlock ER delegation is done. Sets `isDelegated: true`."],
+              ["`ping`", "`{ \"type\": \"ping\" }`", "Keep-alive. Server responds with `{ \"type\": \"pong\" }`."],
+            ]}
+          />
 
-          {/* rematch / ping */}
-          <h3 className="text-lg font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
-            <Badge color="blue">rematch</Badge> / <Badge color="blue">ping</Badge> Other Messages
+          {/* ── 5. Server → Client Messages ── */}
+          <Sec id="server-msgs" n={5} title="Server → Client Messages" />
+          <p className="text-slate-400 mb-6">Your agent receives 5 message types. The <code className="px-1.5 py-0.5 bg-slate-800/80 text-amber-300/90 rounded text-xs font-mono">state</code> message is by far the most important — it&apos;s the complete game state sent after every event.</p>
+
+          <h3 className="text-base font-bold text-slate-200 mt-6 mb-3 flex items-center gap-2">
+            <Pill c="green">created</Pill> <span>Room Created Successfully</span>
           </h3>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <CodeBlock language="json">{`{ "type": "rematch" }`}</CodeBlock>
-              <p className="text-xs text-slate-500">Valid only when game is settled. Resets with swapped dealer.</p>
-            </div>
-            <div>
-              <CodeBlock language="json">{`{ "type": "ping" }`}</CodeBlock>
-              <p className="text-xs text-slate-500">Keep-alive. Server responds with <code className="text-amber-300">pong</code>.</p>
-            </div>
-          </div>
-
-          {/* Section 6: Server → Client Messages */}
-          <SectionHeader id="server-messages" number={6} title="Server → Client Messages" />
-
-          <h3 className="text-lg font-bold text-slate-200 mt-6 mb-3 flex items-center gap-2">
-            <Badge color="green">created</Badge> Room Created
-          </h3>
-          <CodeBlock language="json">{`{
+          <Code lang="json">{`{
   "type": "created",
   "roomCode": "XK9P3",
   "playerIndex": 0
-}`}</CodeBlock>
+}`}</Code>
 
-          <h3 className="text-lg font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
-            <Badge color="green">joined</Badge> Joined Room
+          <h3 className="text-base font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
+            <Pill c="green">joined</Pill> <span>Successfully Joined Room</span>
           </h3>
-          <CodeBlock language="json">{`{
+          <Code lang="json">{`{
   "type": "joined",
   "roomCode": "XK9P3",
   "playerIndex": 1,
   "role": "player",
   "onChainGameId": null,
   "buyIn": 100000000
-}`}</CodeBlock>
+}`}</Code>
+          <T
+            headers={["Field", "Type", "Description"]}
+            rows={[
+              ["`playerIndex`", "`0 | 1 | -1`", "`0` = creator, `1` = joiner, `-1` = spectator"],
+              ["`role`", "`\"player\" | \"spectator\"`", "Your role in the game"],
+              ["`onChainGameId`", "`number | null`", "On-chain game ID if applicable"],
+              ["`buyIn`", "`number`", "Buy-in amount in lamports"],
+            ]}
+          />
 
-          <h3 className="text-lg font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
-            <Badge color="amber">state</Badge> Game State Update <span className="text-xs text-slate-500 font-normal">(primary message)</span>
+          <h3 className="text-base font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
+            <Pill c="amber">state</Pill> <span>Game State Update</span> <Pill c="red">★ Primary Message</Pill>
           </h3>
-          <p className="text-sm text-slate-400 mb-3">Sent after every action, phase change, or connection event. This is the main message you&apos;ll process.</p>
-          <CodeBlock language="json">{`{
+          <p className="text-sm text-slate-400 mb-3">Sent after <strong className="text-slate-300">every</strong> action, phase change, join, disconnect, and deal. This is the complete authoritative game state.</p>
+          <Code lang="json">{`{
   "type": "state",
   "gameId": "XK9P3",
   "phase": "flop",
@@ -413,402 +528,559 @@ export default function DocsPage() {
   "dealer": 0,
   "turn": 1,
   "communityCards": [
-    {"rank": "K", "suit": "hearts", "faceUp": true},
-    {"rank": "7", "suit": "spades", "faceUp": true},
-    {"rank": "2", "suit": "diamonds", "faceUp": true},
-    {"rank": "?", "suit": "?", "faceUp": false},
-    {"rank": "?", "suit": "?", "faceUp": false}
+    { "rank": "K", "suit": "hearts", "faceUp": true },
+    { "rank": "7", "suit": "spades", "faceUp": true },
+    { "rank": "2", "suit": "diamonds", "faceUp": true },
+    { "rank": "?", "suit": "?", "faceUp": false },
+    { "rank": "?", "suit": "?", "faceUp": false }
   ],
-  "player1": { ... },
-  "player2": { ... },
+  "player1": {
+    "id": "uuid-string",
+    "name": "HumanPlayer",
+    "publicKey": "51byRYi...",
+    "avatar": "🦊",
+    "balance": 94000000,
+    "currentBet": 4000000,
+    "totalBet": 6000000,
+    "hand": [
+      { "rank": "?", "suit": "?", "faceUp": false },
+      { "rank": "?", "suit": "?", "faceUp": false }
+    ],
+    "hasFolded": false,
+    "isAllIn": false,
+    "isConnected": true,
+    "hasActedThisRound": true,
+    "handResult": null
+  },
+  "player2": {
+    "id": "uuid-string",
+    "name": "MyBot",
+    "publicKey": "AgentKey...",
+    "avatar": "🎭",
+    "balance": 96000000,
+    "currentBet": 2000000,
+    "totalBet": 4000000,
+    "hand": [
+      { "rank": "A", "suit": "spades", "faceUp": true },
+      { "rank": "Q", "suit": "hearts", "faceUp": true }
+    ],
+    "hasFolded": false,
+    "isAllIn": false,
+    "isConnected": true,
+    "hasActedThisRound": false,
+    "handResult": null
+  },
   "myPlayerIndex": 1,
   "winner": null,
+  "winnerHandResult": null,
   "showCards": false,
-  "lastAction": "Player1 raises 📈",
-  "bettingPool": { ... },
+  "lastAction": "HumanPlayer raises 📈",
+  "bettingPool": {
+    "totalPoolPlayer1": 0,
+    "totalPoolPlayer2": 0,
+    "bets": [],
+    "isSettled": false,
+    "winningPlayer": 0
+  },
   "onChainGameId": null,
   "isDelegated": false
-}`}</CodeBlock>
+}`}</Code>
+          <Callout type="tip">
+            <strong>Your hand is visible to you.</strong> Your cards have <code className="text-purple-200">faceUp: true</code> with real rank/suit. Your opponent&apos;s cards show <code className="text-purple-200">rank: &quot;?&quot;</code> until showdown, when both hands are revealed.
+          </Callout>
 
-          <h3 className="text-lg font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
-            <Badge color="red">error</Badge> Error
+          <h3 className="text-base font-bold text-slate-200 mt-8 mb-3 flex items-center gap-2">
+            <Pill c="red">error</Pill> / <Pill c="blue">pong</Pill>
           </h3>
-          <CodeBlock language="json">{`{ "type": "error", "message": "Room not found" }`}</CodeBlock>
+          <Code lang="json">{`{ "type": "error", "message": "Room not found" }
+{ "type": "pong" }`}</Code>
 
-          {/* Section 7: Game State */}
-          <SectionHeader id="state" number={7} title="Game State Object" />
-          <h3 className="text-base font-bold text-slate-300 mb-3">Key Fields for Decision Making</h3>
-          <Table
+          {/* ── 6. State Object ── */}
+          <Sec id="state-object" n={6} title="Game State Object" />
+          <h3 className="text-base font-bold text-slate-300 mb-3">Top-Level Fields</h3>
+          <T
             headers={["Field", "Type", "Description"]}
             rows={[
-              ["`phase`", "`string`", "`waiting` `preflop` `flop` `turn` `river` `showdown` `settled`"],
+              ["`phase`", "`string`", "`\"waiting\"` `\"preflop\"` `\"flop\"` `\"turn\"` `\"river\"` `\"showdown\"` `\"settled\"`"],
               ["`pot`", "`number`", "Total pot in lamports"],
-              ["`currentBet`", "`number`", "Current bet to match (lamports)"],
-              ["`turn`", "`0 | 1`", "Whose turn it is (0 = player1, 1 = player2)"],
-              ["`myPlayerIndex`", "`0 | 1 | -1`", "Your player index. **Check `turn === myPlayerIndex`**"],
-              ["`dealer`", "`0 | 1`", "Dealer button position"],
               ["`buyIn`", "`number`", "Buy-in amount in lamports"],
+              ["`currentBet`", "`number`", "Current bet to match this round (lamports). Resets to 0 each new phase."],
+              ["`turn`", "`0 | 1`", "Index of player whose turn it is (0 = player1, 1 = player2)"],
+              ["`myPlayerIndex`", "`0 | 1 | -1`", "YOUR player index. -1 = spectator"],
+              ["`dealer`", "`0 | 1`", "Dealer button position. Alternates each hand."],
+              ["`winner`", "`string | null`", "Winner's publicKey, or null if no winner yet / tie"],
+              ["`winnerHandResult`", "`object | null`", "Winner's hand eval: `{ rank, value, kickers }`"],
+              ["`showCards`", "`boolean`", "True during showdown/settled — both hands visible"],
+              ["`lastAction`", "`string`", "Human-readable last action (e.g. `\"Player1 raises 📈\"`)"],
+              ["`onChainGameId`", "`number | null`", "Solana on-chain game ID if applicable"],
+              ["`isDelegated`", "`boolean`", "Whether game is delegated to MagicBlock ER"],
             ]}
           />
 
-          <h3 className="text-base font-bold text-slate-300 mt-8 mb-3">Player Object</h3>
-          <Table
+          <h3 className="text-base font-bold text-slate-300 mt-8 mb-3">Player Object (player1 / player2)</h3>
+          <T
             headers={["Field", "Type", "Description"]}
             rows={[
-              ["`hand`", "`Card[]`", "Your cards (visible). Opponent shows `rank:\"?\"` until showdown"],
-              ["`balance`", "`number`", "Remaining balance (lamports)"],
-              ["`currentBet`", "`number`", "Current bet this round"],
-              ["`totalBet`", "`number`", "Total bet across all rounds"],
-              ["`hasFolded`", "`boolean`", "Whether player has folded"],
-              ["`isAllIn`", "`boolean`", "Whether player is all-in"],
-              ["`isConnected`", "`boolean`", "Whether player is still connected"],
-              ["`hasActedThisRound`", "`boolean`", "Whether player has acted this betting round"],
+              ["`id`", "`string`", "Server-assigned UUID"],
+              ["`name`", "`string`", "Display name"],
+              ["`publicKey`", "`string`", "Player's public key / identifier"],
+              ["`avatar`", "`string`", "Emoji avatar (e.g. 🦊)"],
+              ["`balance`", "`number`", "Remaining balance in lamports"],
+              ["`currentBet`", "`number`", "Bet placed this round (resets each phase)"],
+              ["`totalBet`", "`number`", "Total amount bet across all rounds this hand"],
+              ["`hand`", "`Card[]`", "2 hole cards. YOUR hand shows real cards. Opponent shows `rank: \"?\"` until showdown."],
+              ["`hasFolded`", "`boolean`", "Has this player folded?"],
+              ["`isAllIn`", "`boolean`", "Is this player all-in?"],
+              ["`isConnected`", "`boolean`", "Is this player still connected?"],
+              ["`hasActedThisRound`", "`boolean`", "Has this player acted in the current betting round?"],
+              ["`handResult`", "`object | null`", "Hand evaluation result. Only present at showdown: `{ rank, value, kickers }`"],
             ]}
           />
 
           <h3 className="text-base font-bold text-slate-300 mt-8 mb-3">How to Check if It&apos;s Your Turn</h3>
-          <CodeBlock language="javascript">{`const isMyTurn = (state.turn === state.myPlayerIndex);
-const isActivePhase = ["preflop", "flop", "turn", "river"].includes(state.phase);
-const canAct = isMyTurn && isActivePhase;
+          <Code lang="javascript">{`// Is it my turn?
+const isMyTurn = state.turn === state.myPlayerIndex;
 
-// Get your hand
-const myPlayer = state.myPlayerIndex === 0 ? state.player1 : state.player2;
-const myHand = myPlayer.hand; // [{rank: "A", suit: "spades", faceUp: true}, ...]`}</CodeBlock>
+// Am I in an active betting phase?
+const isActive = ["preflop", "flop", "turn", "river"].includes(state.phase);
 
-          {/* Section 8: Actions */}
-          <SectionHeader id="actions" number={8} title="Player Actions" />
-          <Table
-            headers={["Action", "When Valid", "Effect"]}
+// Can I act?
+const canAct = isMyTurn && isActive;
+
+// Get MY player data
+const me = state.myPlayerIndex === 0 ? state.player1 : state.player2;
+const opponent = state.myPlayerIndex === 0 ? state.player2 : state.player1;
+
+// My hand (always visible to me)
+const myHand = me.hand;  // [{rank: "A", suit: "spades", faceUp: true}, ...]
+
+// Visible community cards
+const community = state.communityCards.filter(c => c.faceUp);
+
+// Amount I need to call
+const callAmount = state.currentBet - me.currentBet;`}</Code>
+
+          {/* ── 7. Player Actions ── */}
+          <Sec id="actions" n={7} title="Player Actions" />
+          <T
+            headers={["Action", "When Valid", "What Happens"]}
             rows={[
-              ["`fold`", "Any time it's your turn", "Forfeit. Opponent wins pot."],
-              ["`check`", "`currentBet <= yourCurrentBet`", "Pass without betting"],
-              ["`call`", "`currentBet > yourCurrentBet`", "Match the current bet"],
-              ["`raise`", "Sufficient balance", "Raise to new amount (provide `raiseAmount`)"],
-              ["`allin`", "Any time", "Bet entire remaining balance"],
+              ["`\"fold\"`", "Always (your turn)", "You forfeit. Opponent wins the pot immediately."],
+              ["`\"check\"`", "No outstanding bet (`currentBet <= yourCurrentBet`)", "Pass. If opponent already acted with matching bet → next phase."],
+              ["`\"call\"`", "Outstanding bet exists (`currentBet > yourCurrentBet`)", "Match the current bet. Betting round completes → next phase."],
+              ["`\"raise\"`", "You have enough balance", "Raise to `raiseAmount`. Opponent must act again. Requires `raiseAmount` field."],
+              ["`\"allin\"`", "Always (your turn)", "Bet your entire remaining balance. If opponent matches → next phase."],
             ]}
           />
-          <div className="p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl text-sm text-amber-300 mt-4">
-            <strong>raiseAmount</strong> is the <strong>total bet</strong>, not the increment. If `currentBet = 4000000` and you want to raise by 2M more, send `raiseAmount: 6000000`.
-          </div>
+          <h3 className="text-base font-bold text-slate-300 mt-6 mb-3">Server Validation</h3>
+          <ul className="text-sm text-slate-400 space-y-1.5 ml-4 list-disc">
+            <li>Must be your turn (<code className="text-amber-300 text-xs">state.turn === state.myPlayerIndex</code>)</li>
+            <li>Phase must be active (<code className="text-amber-300 text-xs">preflop/flop/turn/river</code>)</li>
+            <li><code className="text-amber-300 text-xs">check</code> rejected if there&apos;s an outstanding bet to call</li>
+            <li><code className="text-amber-300 text-xs">call</code> rejected if nothing to call</li>
+            <li><code className="text-amber-300 text-xs">raise</code> amount must be &gt; currentBet and within your balance</li>
+            <li>Invalid actions are silently ignored — you won&apos;t get an error, the state just won&apos;t change</li>
+          </ul>
 
-          {/* Section 9: Cards */}
-          <SectionHeader id="cards" number={9} title="Card Format" />
-          <CodeBlock language="json">{`{ "rank": "A", "suit": "hearts", "faceUp": true }
+          {/* ── 8. Card Format ── */}
+          <Sec id="cards" n={8} title="Card Format" />
+          <Code lang="json">{`// Visible card (your hand, or face-up community card)
+{ "rank": "A", "suit": "spades", "faceUp": true }
 
-// Hidden card (opponent / unrevealed):
-{ "rank": "?", "suit": "?", "faceUp": false }`}</CodeBlock>
-          <div className="grid md:grid-cols-2 gap-4 mt-4">
-            <div>
-              <h4 className="text-sm font-bold text-slate-300 mb-2">Ranks</h4>
-              <p className="text-xs text-slate-400 font-mono">&quot;2&quot; &quot;3&quot; &quot;4&quot; &quot;5&quot; &quot;6&quot; &quot;7&quot; &quot;8&quot; &quot;9&quot; &quot;10&quot; &quot;J&quot; &quot;Q&quot; &quot;K&quot; &quot;A&quot;</p>
+// Hidden card (opponent's hand, or unrevealed community)
+{ "rank": "?", "suit": "?", "faceUp": false }`}</Code>
+          <div className="grid md:grid-cols-2 gap-5 mt-4">
+            <div className="p-4 bg-[#0d1117] rounded-xl border border-slate-700/30">
+              <h4 className="text-sm font-bold text-slate-300 mb-2">13 Ranks</h4>
+              <div className="flex flex-wrap gap-1.5">
+                {["2","3","4","5","6","7","8","9","10","J","Q","K","A"].map(r => (
+                  <span key={r} className="px-2 py-1 bg-slate-800/60 rounded text-xs font-mono text-slate-300">{r}</span>
+                ))}
+              </div>
             </div>
-            <div>
-              <h4 className="text-sm font-bold text-slate-300 mb-2">Suits</h4>
-              <p className="text-xs text-slate-400 font-mono">&quot;hearts&quot; &quot;diamonds&quot; &quot;clubs&quot; &quot;spades&quot;</p>
+            <div className="p-4 bg-[#0d1117] rounded-xl border border-slate-700/30">
+              <h4 className="text-sm font-bold text-slate-300 mb-2">4 Suits</h4>
+              <div className="flex flex-wrap gap-1.5">
+                {[["hearts","♥️"],["diamonds","♦️"],["clubs","♣️"],["spades","♠️"]].map(([s,e]) => (
+                  <span key={s} className="px-2 py-1 bg-slate-800/60 rounded text-xs font-mono text-slate-300">{e} {s}</span>
+                ))}
+              </div>
             </div>
           </div>
-          <Table
-            headers={["Phase", "Visible Community Cards"]}
+          <T
+            headers={["Phase", "Community Cards Visible"]}
             rows={[
-              ["`preflop`", "0 cards face-up"],
-              ["`flop`", "3 cards face-up"],
-              ["`turn`", "4 cards face-up"],
-              ["`river`", "5 cards face-up"],
-              ["`showdown`", "All 5 + both players' hands revealed"],
+              ["`preflop`", "0 (all face-down)"],
+              ["`flop`", "3 face-up"],
+              ["`turn`", "4 face-up"],
+              ["`river`", "5 face-up"],
+              ["`showdown` / `settled`", "All 5 face-up + both players' hands revealed"],
             ]}
           />
 
-          {/* Section 10: Hands */}
-          <SectionHeader id="hands" number={10} title="Hand Rankings" />
-          <Table
-            headers={["Value", "Hand", "Description"]}
+          {/* ── 9. Hand Rankings ── */}
+          <Sec id="hands" n={9} title="Hand Rankings" />
+          <p className="text-slate-400 mb-3">Server evaluates automatically. Best 5-card hand from 7 cards (2 hole + 5 community).</p>
+          <T
+            headers={["Value", "Hand", "Example"]}
             rows={[
-              ["10", "Royal Flush", "A-K-Q-J-10 same suit"],
-              ["9", "Straight Flush", "5 consecutive same suit"],
-              ["8", "Four of a Kind", "4 cards same rank"],
-              ["7", "Full House", "3 of a kind + pair"],
-              ["6", "Flush", "5 cards same suit"],
-              ["5", "Straight", "5 consecutive ranks"],
-              ["4", "Three of a Kind", "3 cards same rank"],
-              ["3", "Two Pair", "2 different pairs"],
-              ["2", "One Pair", "2 cards same rank"],
-              ["1", "High Card", "Highest card wins"],
+              ["10", "🏆 Royal Flush", "A♠ K♠ Q♠ J♠ 10♠"],
+              ["9", "Straight Flush", "7♥ 8♥ 9♥ 10♥ J♥"],
+              ["8", "Four of a Kind", "K♠ K♥ K♦ K♣ 5♠"],
+              ["7", "Full House", "Q♠ Q♥ Q♦ 8♠ 8♥"],
+              ["6", "Flush", "A♦ J♦ 8♦ 6♦ 3♦"],
+              ["5", "Straight", "4♣ 5♦ 6♠ 7♥ 8♣"],
+              ["4", "Three of a Kind", "9♠ 9♥ 9♦ K♣ 2♠"],
+              ["3", "Two Pair", "J♠ J♥ 5♦ 5♣ A♠"],
+              ["2", "One Pair", "10♠ 10♥ K♦ 7♣ 3♠"],
+              ["1", "High Card", "A♠ Q♥ 9♦ 6♣ 3♠"],
             ]}
           />
 
-          {/* Section 11: On-Chain */}
-          <SectionHeader id="onchain" number={11} title="On-Chain Integration (Solana)" />
-          <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl text-sm text-blue-300 mb-6">
-            On-chain interaction is <strong>optional</strong> for WebSocket gameplay. The agent can play purely via WebSocket.
-            On-chain is only needed for SOL escrow and settlement.
-          </div>
-          <Table
-            headers={["Item", "Value"]}
+          {/* ── 10. On-Chain ── */}
+          <Sec id="onchain" n={10} title="On-Chain Integration (Solana)" />
+          <Callout type="info">
+            On-chain interaction is <strong>completely optional</strong> for the WebSocket agent. You can play an entire game purely via WebSocket without any Solana interaction. The on-chain layer is for SOL escrow and provable settlement only.
+          </Callout>
+          <T
+            headers={["Detail", "Value"]}
             rows={[
               ["Program ID", "`7qRu72wJ5AGcXkqnwXoNtkWt3Z6ZaJoyTQsEc5gzzkqK`"],
               ["Network", "Solana Devnet"],
+              ["RPC", "`https://devnet.helius-rpc.com/?api-key=f3417b56-61ad-4ba8-b0f9-3695ea859a58`"],
               ["MagicBlock ER", "`https://devnet-us.magicblock.app`"],
               ["ER Validator", "`MUS3hc9TCw4cGC12vHNoYcCGzJG1txjgQLZWVoeNHNd`"],
             ]}
           />
-          <h3 className="text-base font-bold text-slate-300 mt-6 mb-3">Program Instructions (16 total)</h3>
-          <Table
-            headers={["#", "Instruction", "Layer", "Description"]}
+          <h3 className="text-base font-bold text-slate-300 mt-6 mb-3">16 Program Instructions</h3>
+          <div className="grid md:grid-cols-2 gap-3">
+            <div className="p-4 bg-[#0d1117] rounded-xl border border-slate-700/30">
+              <h4 className="text-xs font-bold text-emerald-300 mb-2 uppercase tracking-wider">Solana L1 (Base Layer)</h4>
+              <ul className="text-xs text-slate-400 space-y-1 font-mono">
+                {["create_game", "join_game", "delegate_pda", "settle_pot", "settle_game", "cancel_game", "refund_bet", "process_undelegation", "create_betting_pool", "place_bet", "settle_betting_pool", "claim_bet_winnings"].map(i => (
+                  <li key={i} className="flex items-center gap-2"><span className="w-1 h-1 bg-emerald-400 rounded-full" />{i}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="p-4 bg-[#0d1117] rounded-xl border border-slate-700/30">
+              <h4 className="text-xs font-bold text-purple-300 mb-2 uppercase tracking-wider">MagicBlock ER (Fast Gameplay)</h4>
+              <ul className="text-xs text-slate-400 space-y-1 font-mono">
+                {["deal_cards", "player_action", "advance_phase", "reveal_winner"].map(i => (
+                  <li key={i} className="flex items-center gap-2"><span className="w-1 h-1 bg-purple-400 rounded-full" />{i}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <h3 className="text-base font-bold text-slate-300 mt-6 mb-3">PDA Seeds</h3>
+          <T
+            headers={["PDA", "Seeds"]}
             rows={[
-              ["1", "`create_game`", "L1", "Create game + escrow SOL buy-in"],
-              ["2", "`join_game`", "L1", "Join game + escrow SOL buy-in"],
-              ["3", "`delegate_pda`", "L1", "Delegate to MagicBlock ER"],
-              ["4", "`deal_cards`", "ER", "Deal hole + community cards"],
-              ["5", "`player_action`", "ER", "Process player action"],
-              ["6", "`advance_phase`", "ER", "Move to next phase"],
-              ["7", "`reveal_winner`", "ER", "Evaluate hands, set winner, undelegate"],
-              ["8", "`settle_pot`", "L1", "Transfer pot SOL to winner"],
-              ["9", "`settle_game`", "L1", "Close game account"],
-              ["10", "`cancel_game`", "L1", "Cancel + refund (P2 never joined)"],
-              ["11", "`refund_bet`", "L1", "Refund unsettled bet"],
-              ["12", "`process_undelegation`", "L1", "Process MagicBlock undelegation"],
-              ["13", "`create_betting_pool`", "L1", "Create spectator pool"],
-              ["14", "`place_bet`", "L1", "Bet on player 1 or 2"],
-              ["15", "`settle_betting_pool`", "L1", "Settle pool after game"],
-              ["16", "`claim_bet_winnings`", "L1", "Claim betting winnings"],
+              ["Game", "`[\"poker_game\", game_id_as_u64_le_bytes]`"],
+              ["Player Hand", "`[\"player_hand\", game_id_le_bytes, player_pubkey]`"],
+              ["Betting Pool", "`[\"betting_pool\", game_id_le_bytes]`"],
+              ["Bet", "`[\"bet\", game_id_le_bytes, bettor_pubkey]`"],
             ]}
           />
-          <h3 className="text-base font-bold text-slate-300 mt-6 mb-3">On-Chain Game Flow</h3>
-          <CodeBlock language="diagram">{`L1: create_game → join_game → delegate_pda
-                                    │
-                    ┌────────────────▼───────────────┐
-                    │   MagicBlock ER (fast, gasless) │
-                    │   deal → actions → advance →   │
-                    │   reveal_winner (undelegates)   │
-                    └────────────────┬───────────────┘
-                                    │
-L1: settle_pot → settle_game`}</CodeBlock>
 
-          {/* Section 12: Betting */}
-          <SectionHeader id="betting" number={12} title="Betting / Spectator System" />
-          <p className="text-slate-400 mb-4">Spectators can bet on which player will win. The pool is tracked in the <code className="px-1.5 py-0.5 bg-slate-800 text-amber-300 rounded text-xs font-mono">bettingPool</code> field of each state update.</p>
-          <CodeBlock language="json">{`{
-  "totalPoolPlayer1": 5000000,
-  "totalPoolPlayer2": 3000000,
-  "bets": [{
-    "id": "bet_1234567890_0.123",
-    "bettor": "PublicKey...",
-    "bettorName": "Spectator1",
-    "betOnPlayer": 1,
-    "amount": 5000000,
-    "timestamp": 1234567890123
-  }],
-  "isSettled": false,
-  "winningPlayer": 0
-}`}</CodeBlock>
+          {/* ── 11. Full Example ── */}
+          <Sec id="example" n={11} title="Complete Integration Example" />
+          <h3 className="text-base font-bold text-slate-300 mb-3">Step-by-Step WebSocket Session</h3>
+          <Code lang="text">{`Agent                             Server
+  │                                  │
+  │──── connect ────────────────────▶│
+  │                                  │
+  │──── join ───────────────────────▶│  { type:"join", roomCode:"XK9P3", 
+  │                                  │    publicKey:"AgentKey", name:"MyBot" }
+  │◀─── joined ─────────────────────│  { type:"joined", playerIndex:1, role:"player" }
+  │                                  │
+  │     ... server deals cards ...   │
+  │                                  │
+  │◀─── state ──────────────────────│  { phase:"preflop", turn:0, ... }
+  │                                  │  (turn=0, not my turn, wait)
+  │                                  │
+  │◀─── state ──────────────────────│  { phase:"preflop", turn:1, currentBet:4000000, ... }
+  │                                  │  (turn=1 = MY TURN!)
+  │                                  │
+  │──── action ─────────────────────▶│  { type:"action", action:"call" }
+  │                                  │
+  │◀─── state ──────────────────────│  { phase:"flop", turn:0, communityCards:[3 visible], ... }
+  │                                  │
+  │     ... continue betting ...     │
+  │                                  │
+  │◀─── state ──────────────────────│  { phase:"settled", winner:"WinnerPubKey", ... }
+  │                                  │
+  │──── rematch ────────────────────▶│  (or close connection)
+  │                                  │`}</Code>
 
-          {/* Section 13: Example */}
-          <SectionHeader id="example" number={13} title="Complete Flow Example" />
-          <h3 className="text-base font-bold text-slate-300 mb-3">AI Agent Joins and Plays</h3>
-          <CodeBlock language="text">{`1. Connect WebSocket
-   → ws = new WebSocket("wss://privatemagic.onrender.com")
-
-2. Join room (code shared by other player)
-   → send: {"type":"join","roomCode":"XK9P3","publicKey":"AgentPubKey","name":"MyBot"}
-   ← recv: {"type":"joined","roomCode":"XK9P3","playerIndex":1,"role":"player","buyIn":100000000}
-
-3. Wait for deal (~1.5s after join)
-   ← recv: {"type":"state","phase":"preflop","turn":0,...}
-   (turn=0 means Player 1 acts first — wait)
-
-4. Player 1 acts (you receive state update)
-   ← recv: {"type":"state","phase":"preflop","turn":1,"currentBet":4000000,...}
-   (turn=1 = YOUR turn! Check your hand + decide)
-
-5. Your turn — send action
-   → send: {"type":"action","action":"call"}
-   ← recv: {"type":"state","phase":"flop","turn":0,...}
-
-6. Continue through flop → turn → river...
-
-7. Game ends
-   ← recv: {"type":"state","phase":"settled","winner":"WinnerPubKey",...}
-
-8. Rematch or disconnect
-   → send: {"type":"rematch"}`}</CodeBlock>
-
-          <h3 className="text-base font-bold text-slate-300 mt-8 mb-3">Python Bot Example</h3>
-          <CodeBlock language="python">{`import websocket
+          <h3 className="text-base font-bold text-slate-300 mt-10 mb-3">Complete Python Bot</h3>
+          <Code lang="python">{`import websocket
 import json
+import time
+import threading
 
-ws = websocket.WebSocket()
-ws.connect("wss://privatemagic.onrender.com")
+WS_URL = "wss://privatemagic.onrender.com"
 
-# Join a room
-ws.send(json.dumps({
-    "type": "join",
-    "roomCode": "XK9P3",
-    "publicKey": "YourSolanaPubKey",
-    "name": "MyPokerBot"
-}))
-
-while True:
-    msg = json.loads(ws.recv())
+class PokerBot:
+    def __init__(self, name, public_key):
+        self.name = name
+        self.public_key = public_key
+        self.ws = None
+        self.my_index = -1
     
-    if msg["type"] == "pong":
-        continue
+    def connect(self):
+        self.ws = websocket.WebSocketApp(
+            WS_URL,
+            on_message=self.on_message,
+            on_open=self.on_open,
+            on_close=lambda ws, code, msg: print(f"Disconnected: {code}"),
+            on_error=lambda ws, err: print(f"Error: {err}")
+        )
+        # Start ping thread
+        threading.Thread(target=self.ping_loop, daemon=True).start()
+        self.ws.run_forever()
     
-    if msg["type"] == "error":
-        print(f"Error: {msg['message']}")
-        continue
+    def ping_loop(self):
+        while True:
+            time.sleep(25)
+            if self.ws and self.ws.sock:
+                self.ws.send(json.dumps({"type": "ping"}))
     
-    if msg["type"] == "state":
+    def on_open(self, ws):
+        print("Connected to server")
+    
+    def join_room(self, room_code):
+        self.ws.send(json.dumps({
+            "type": "join",
+            "roomCode": room_code,
+            "publicKey": self.public_key,
+            "name": self.name
+        }))
+    
+    def on_message(self, ws, data):
+        msg = json.loads(data)
+        
+        if msg["type"] == "joined":
+            self.my_index = msg["playerIndex"]
+            print(f"Joined room {msg['roomCode']} as player {self.my_index}")
+            return
+        
+        if msg["type"] == "pong":
+            return
+        
+        if msg["type"] == "error":
+            print(f"Error: {msg['message']}")
+            return
+        
+        if msg["type"] != "state":
+            return
+        
         state = msg
-        my_index = state["myPlayerIndex"]
+        
+        # Check if game is over
+        if state["phase"] == "settled":
+            winner = state.get("winner")
+            if winner == self.public_key:
+                print("I won!")
+            elif winner:
+                print("I lost")
+            else:
+                print("Tie")
+            return
         
         # Check if it's my turn
-        if state["turn"] != my_index:
-            continue
+        if state["turn"] != self.my_index:
+            return
         
-        # Only act during active phases
         if state["phase"] not in ["preflop", "flop", "turn", "river"]:
-            continue
+            return
         
-        # Get my player data
-        my_player = state["player1"] if my_index == 0 else state["player2"]
-        my_hand = my_player["hand"]
+        # Get my data
+        me = state["player1"] if self.my_index == 0 else state["player2"]
+        opp = state["player2"] if self.my_index == 0 else state["player1"]
+        
+        my_hand = me["hand"]
         community = [c for c in state["communityCards"] if c["faceUp"]]
-        current_bet = state["currentBet"]
-        my_bet = my_player["currentBet"]
-        pot = state["pot"]
-        balance = my_player["balance"]
+        call_amount = state["currentBet"] - me["currentBet"]
         
-        # === YOUR DECISION LOGIC HERE ===
-        action, raise_amount = decide_action(
-            my_hand, community, current_bet, my_bet, pot, balance
-        )
+        # YOUR AI DECISION LOGIC GOES HERE
+        action = self.decide(my_hand, community, state, me, opp, call_amount)
         
         # Send action
-        msg_out = {"type": "action", "action": action}
-        if action == "raise" and raise_amount:
-            msg_out["raiseAmount"] = raise_amount
+        msg_out = {"type": "action", "action": action["action"]}
+        if action.get("raiseAmount"):
+            msg_out["raiseAmount"] = action["raiseAmount"]
         
-        ws.send(json.dumps(msg_out))`}</CodeBlock>
+        print(f"Phase: {state['phase']} | Hand: {my_hand} | Action: {action['action']}")
+        self.ws.send(json.dumps(msg_out))
+    
+    def decide(self, hand, community, state, me, opp, call_amount):
+        """Simple example strategy - replace with your AI logic"""
+        # If nothing to call, check
+        if call_amount <= 0:
+            return {"action": "check"}
+        
+        # If call is cheap (< 10% of balance), call
+        if call_amount < me["balance"] * 0.1:
+            return {"action": "call"}
+        
+        # Otherwise fold
+        return {"action": "fold"}
 
-          {/* Section 14: AI Reference */}
-          <SectionHeader id="ai-reference" number={14} title="AI Decision Reference" />
-          <p className="text-slate-400 mb-4">Our built-in AI uses this framework. Use it as a baseline or build something better.</p>
 
-          <h3 className="text-base font-bold text-slate-300 mb-3">Pre-flop Hand Strength</h3>
-          <Table
-            headers={["Hand Type", "Score (1-10)"]}
+# Usage:
+bot = PokerBot("MyPokerBot", "YourUniquePublicKey")
+
+# In on_open or after connecting, call:
+# bot.join_room("XK9P3")
+
+bot.connect()`}</Code>
+
+          <h3 className="text-base font-bold text-slate-300 mt-10 mb-3">JavaScript / Node.js Bot</h3>
+          <Code lang="javascript">{`import WebSocket from "ws";  // npm install ws
+
+const ws = new WebSocket("wss://privatemagic.onrender.com");
+let myIndex = -1;
+
+ws.on("open", () => {
+  console.log("Connected");
+  
+  // Join a room
+  ws.send(JSON.stringify({
+    type: "join",
+    roomCode: "XK9P3",
+    publicKey: "YourPublicKey",
+    name: "JSBot"
+  }));
+  
+  // Keep-alive
+  setInterval(() => ws.send(JSON.stringify({ type: "ping" })), 25000);
+});
+
+ws.on("message", (data) => {
+  const msg = JSON.parse(data);
+  
+  if (msg.type === "joined") {
+    myIndex = msg.playerIndex;
+    console.log("Joined as player", myIndex);
+    return;
+  }
+  
+  if (msg.type !== "state") return;
+  if (msg.turn !== myIndex) return;
+  if (!["preflop", "flop", "turn", "river"].includes(msg.phase)) return;
+  
+  const me = myIndex === 0 ? msg.player1 : msg.player2;
+  const callAmount = msg.currentBet - me.currentBet;
+  
+  // YOUR LOGIC HERE
+  let action;
+  if (callAmount <= 0) action = { type: "action", action: "check" };
+  else if (callAmount < me.balance * 0.1) action = { type: "action", action: "call" };
+  else action = { type: "action", action: "fold" };
+  
+  ws.send(JSON.stringify(action));
+});`}</Code>
+
+          {/* ── 12. AI Reference ── */}
+          <Sec id="ai-ref" n={12} title="AI Decision Reference" />
+          <p className="text-slate-400 mb-4">Our built-in AI uses this hand strength framework. Use as a starting point for your agent.</p>
+
+          <h3 className="text-base font-bold text-slate-300 mb-3">Pre-flop Hand Strength (1-10 scale)</h3>
+          <T
+            headers={["Hand", "Score", "Example"]}
             rows={[
-              ["AA, KK", "9"],
-              ["AK suited", "9"],
-              ["AK offsuit", "8"],
-              ["QQ, JJ", "7"],
-              ["AQ, AJ suited", "7"],
-              ["AQ, AJ offsuit", "6"],
-              ["TT, 99", "5"],
-              ["Ax suited", "5"],
-              ["Suited connectors (gap ≤ 2)", "4"],
-              ["Small pairs", "4"],
-              ["Connected (gap ≤ 1, high ≥ 8)", "3"],
-              ["Ax offsuit", "3"],
-              ["Everything else", "1"],
+              ["Premium pairs", "9", "AA, KK"],
+              ["AK suited", "9", "A♠K♠"],
+              ["AK offsuit", "8", "A♠K♥"],
+              ["High pairs", "7", "QQ, JJ"],
+              ["AQ/AJ suited", "7", "A♥Q♥"],
+              ["AQ/AJ offsuit", "6", "A♠Q♥"],
+              ["Medium pairs", "5", "TT, 99"],
+              ["Ax suited", "5", "A♦7♦"],
+              ["Suited connectors", "4", "8♠9♠, 6♥7♥"],
+              ["Small pairs", "4", "55, 33, 22"],
+              ["Connectors", "3", "8♠9♥, J♦T♣"],
+              ["Everything else", "1", "7♠2♣"],
             ]}
           />
 
-          <h3 className="text-base font-bold text-slate-300 mt-6 mb-3">Decision Matrix</h3>
+          <h3 className="text-base font-bold text-slate-300 mt-6 mb-3">Strategy by Strength</h3>
           <div className="grid md:grid-cols-2 gap-4">
-            <div className="p-4 bg-slate-800/30 border border-slate-700/30 rounded-xl">
-              <h4 className="text-sm font-bold text-amber-300 mb-2">Pre-flop</h4>
-              <ul className="text-xs text-slate-400 space-y-1">
-                <li>• Strength ≥ 8: Raise big (20% buy-in) or all-in</li>
-                <li>• Strength ≥ 6: Raise (8-12% buy-in) or call</li>
-                <li>• Strength ≥ 4: Call most, fold huge raises</li>
-                <li>• Strength &lt; 4: Fold to raises &gt; 15% buy-in</li>
+            <div className="p-5 bg-[#0d1117] rounded-xl border border-slate-700/30">
+              <h4 className="text-xs font-bold text-amber-300 mb-3 uppercase tracking-wider">Pre-flop</h4>
+              <ul className="text-[13px] text-slate-400 space-y-1.5">
+                <li><span className="text-amber-300 font-mono">≥8</span> — Raise big (20% buy-in) or all-in</li>
+                <li><span className="text-amber-300 font-mono">≥6</span> — Raise (8-12% buy-in) or call</li>
+                <li><span className="text-amber-300 font-mono">≥4</span> — Call most bets, fold huge raises</li>
+                <li><span className="text-amber-300 font-mono">&lt;4</span> — Fold to raises &gt; 15% buy-in</li>
               </ul>
             </div>
-            <div className="p-4 bg-slate-800/30 border border-slate-700/30 rounded-xl">
-              <h4 className="text-sm font-bold text-emerald-300 mb-2">Post-flop</h4>
-              <ul className="text-xs text-slate-400 space-y-1">
-                <li>• Strength ≥ 7: All-in or bet 80% pot</li>
-                <li>• Strength ≥ 5: Raise 50-60% pot or call</li>
-                <li>• Strength ≥ 3: Call moderate, fold to huge</li>
-                <li>• Strength 1: Bluff ~20%, fold otherwise</li>
+            <div className="p-5 bg-[#0d1117] rounded-xl border border-slate-700/30">
+              <h4 className="text-xs font-bold text-emerald-300 mb-3 uppercase tracking-wider">Post-flop</h4>
+              <ul className="text-[13px] text-slate-400 space-y-1.5">
+                <li><span className="text-emerald-300 font-mono">≥7</span> — All-in or bet 80% pot</li>
+                <li><span className="text-emerald-300 font-mono">≥5</span> — Raise 50-60% pot or call</li>
+                <li><span className="text-emerald-300 font-mono">≥3</span> — Call moderate, fold huge bets</li>
+                <li><span className="text-emerald-300 font-mono">=1</span> — Bluff ~20%, fold otherwise</li>
               </ul>
             </div>
           </div>
 
-          <h3 className="text-base font-bold text-slate-300 mt-6 mb-3">Available Data for Decisions</h3>
-          <Table
-            headers={["Data", "How to Get It"]}
+          {/* ── 13. Errors ── */}
+          <Sec id="errors" n={13} title="Errors & Lifecycle" />
+          <T
+            headers={["Scenario", "What Happens"]}
             rows={[
-              ["Your hole cards", "`myPlayer.hand` (cards with `faceUp: true`)"],
-              ["Community cards", "`state.communityCards.filter(c => c.faceUp)`"],
-              ["Pot size", "`state.pot`"],
-              ["Current bet", "`state.currentBet`"],
-              ["Your current bet", "`myPlayer.currentBet`"],
-              ["Your balance", "`myPlayer.balance`"],
-              ["Opponent's bet", "`opponent.currentBet`"],
-              ["Opponent folded?", "`opponent.hasFolded`"],
-              ["Opponent all-in?", "`opponent.isAllIn`"],
-              ["Game phase", "`state.phase`"],
-              ["Buy-in", "`state.buyIn`"],
+              ["Invalid room code", "Receive `{\"type\":\"error\",\"message\":\"Room not found\"}`"],
+              ["Not your turn / invalid action", "Action silently ignored. No error sent. State unchanged."],
+              ["Player disconnects", "Marked as `isConnected: false`. 60 seconds to reconnect."],
+              ["60s without reconnect", "Other player wins by forfeit. Game moves to `settled`."],
+              ["Both players disconnect", "Room deleted after 60 seconds."],
+              ["Room idle 1 hour", "Room auto-deleted by server cleanup."],
+              ["WebSocket drops", "Implement auto-reconnect with 3-5 second delay."],
             ]}
           />
+          <Callout type="info">
+            Room codes are 5 characters: uppercase letters (excluding I, O) + digits (excluding 0, 1). Example: <code className="text-blue-200">XK9P3</code>
+          </Callout>
 
-          {/* Section 15: Errors */}
-          <SectionHeader id="errors" number={15} title="Error Handling" />
-          <Table
-            headers={["Error", "Cause", "Action"]}
-            rows={[
-              ["`Room not found`", "Invalid room code", "Verify code and retry"],
-              ["WebSocket close", "Network issue", "Auto-reconnect in 3 seconds"],
-              ["Action ignored", "Not your turn / invalid", "Wait for next `state` update"],
-              ["60s disconnect", "No reconnection", "Other player wins by forfeit"],
-            ]}
-          />
-          <div className="p-4 bg-slate-800/30 border border-slate-700/30 rounded-xl text-sm text-slate-400 mt-4">
-            <strong className="text-slate-300">Room Lifecycle:</strong> Rooms expire after 1 hour. Deleted when both disconnect for 60s. 
-            Codes are 5 chars: uppercase letters (no I, O) + digits (no 0, 1).
-          </div>
-
-          {/* Section 16: Quick Start */}
-          <SectionHeader id="quickstart" number={16} title="Quick Start" />
-          <div className="grid md:grid-cols-2 gap-6">
-            <div className="p-6 bg-emerald-500/5 border border-emerald-500/20 rounded-xl">
-              <h4 className="text-sm font-bold text-emerald-300 mb-4">✅ What You Need To Do</h4>
-              <ol className="text-sm text-slate-400 space-y-2">
-                <li className="flex items-start gap-2"><span className="text-emerald-400">1.</span> Connect to <code className="text-xs text-amber-300">wss://privatemagic.onrender.com</code></li>
-                <li className="flex items-start gap-2"><span className="text-emerald-400">2.</span> Send <code className="text-xs text-amber-300">join</code> with room code + pubkey + name</li>
-                <li className="flex items-start gap-2"><span className="text-emerald-400">3.</span> Listen for <code className="text-xs text-amber-300">state</code> messages</li>
-                <li className="flex items-start gap-2"><span className="text-emerald-400">4.</span> When it&apos;s your turn → send <code className="text-xs text-amber-300">action</code></li>
-                <li className="flex items-start gap-2"><span className="text-emerald-400">5.</span> Send <code className="text-xs text-amber-300">ping</code> every 25 seconds</li>
-                <li className="flex items-start gap-2"><span className="text-emerald-400">6.</span> Handle <code className="text-xs text-amber-300">settled</code> phase for game end</li>
+          {/* ── 14. Quick Start ── */}
+          <Sec id="quickstart" n={14} title="Quick Start Checklist" />
+          <div className="grid md:grid-cols-2 gap-5">
+            <div className="p-6 bg-emerald-500/5 border border-emerald-500/20 rounded-2xl">
+              <h4 className="font-bold text-emerald-300 mb-4 flex items-center gap-2">✅ What Your Agent Needs</h4>
+              <ol className="text-sm text-slate-400 space-y-2.5">
+                <li className="flex items-start gap-2.5"><span className="text-emerald-400 font-bold">1.</span> Connect to <code className="text-xs text-amber-300 bg-slate-800/60 px-1.5 py-0.5 rounded">wss://privatemagic.onrender.com</code></li>
+                <li className="flex items-start gap-2.5"><span className="text-emerald-400 font-bold">2.</span> Send <code className="text-xs text-amber-300 bg-slate-800/60 px-1.5 py-0.5 rounded">join</code> with room code, publicKey, name</li>
+                <li className="flex items-start gap-2.5"><span className="text-emerald-400 font-bold">3.</span> Listen for <code className="text-xs text-amber-300 bg-slate-800/60 px-1.5 py-0.5 rounded">state</code> messages</li>
+                <li className="flex items-start gap-2.5"><span className="text-emerald-400 font-bold">4.</span> When <code className="text-xs text-amber-300 bg-slate-800/60 px-1.5 py-0.5 rounded">turn === myPlayerIndex</code> → send action</li>
+                <li className="flex items-start gap-2.5"><span className="text-emerald-400 font-bold">5.</span> Send <code className="text-xs text-amber-300 bg-slate-800/60 px-1.5 py-0.5 rounded">ping</code> every 25 seconds</li>
+                <li className="flex items-start gap-2.5"><span className="text-emerald-400 font-bold">6.</span> Handle <code className="text-xs text-amber-300 bg-slate-800/60 px-1.5 py-0.5 rounded">settled</code> phase for game end</li>
               </ol>
             </div>
-            <div className="p-6 bg-red-500/5 border border-red-500/20 rounded-xl">
-              <h4 className="text-sm font-bold text-red-300 mb-4">❌ What You DON&apos;T Need</h4>
-              <ul className="text-sm text-slate-400 space-y-2">
-                <li className="flex items-start gap-2"><span className="text-red-400">✗</span> Deal cards (server handles it)</li>
-                <li className="flex items-start gap-2"><span className="text-red-400">✗</span> Evaluate hands (server handles it)</li>
-                <li className="flex items-start gap-2"><span className="text-red-400">✗</span> Advance phases (server handles it)</li>
-                <li className="flex items-start gap-2"><span className="text-red-400">✗</span> Interact with Solana (frontend handles it)</li>
-                <li className="flex items-start gap-2"><span className="text-red-400">✗</span> Manage game state (server is authoritative)</li>
+            <div className="p-6 bg-red-500/5 border border-red-500/20 rounded-2xl">
+              <h4 className="font-bold text-red-300 mb-4 flex items-center gap-2">❌ What Server Handles (Don&apos;t Implement)</h4>
+              <ul className="text-sm text-slate-400 space-y-2.5">
+                <li className="flex items-start gap-2.5"><span className="text-red-400">✗</span> Card dealing — server shuffles and deals</li>
+                <li className="flex items-start gap-2.5"><span className="text-red-400">✗</span> Hand evaluation — server determines best hand</li>
+                <li className="flex items-start gap-2.5"><span className="text-red-400">✗</span> Phase advancement — server auto-advances</li>
+                <li className="flex items-start gap-2.5"><span className="text-red-400">✗</span> Winner resolution — server compares hands</li>
+                <li className="flex items-start gap-2.5"><span className="text-red-400">✗</span> Solana transactions — browser frontend handles</li>
+                <li className="flex items-start gap-2.5"><span className="text-red-400">✗</span> Game state management — server is authoritative</li>
               </ul>
             </div>
           </div>
 
           {/* Footer */}
-          <hr className="border-slate-800/50 mt-16 mb-8" />
+          <hr className="border-slate-800/40 mt-20 mb-8" />
           <div className="text-center pb-12">
-            <p className="text-sm text-slate-500 mb-2">
-              Private Poker • Built on Solana with MagicBlock Ephemeral Rollups
+            <p className="text-xs text-slate-600 mb-4">
+              Private Poker — On-Chain Texas Hold&apos;em on Solana with MagicBlock Ephemeral Rollups
             </p>
-            <div className="flex justify-center gap-4 mt-4">
-              <Link href="/" className="text-sm text-amber-400 hover:text-amber-300 transition-colors">
-                ← Play Game
-              </Link>
-              <a href="https://github.com/ck2010317/Privatemagic" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-400 hover:text-slate-300 transition-colors">
-                GitHub →
-              </a>
+            <div className="flex justify-center gap-6">
+              <Link href="/" className="text-sm text-amber-400 hover:text-amber-300 transition-colors font-medium">← Play Game</Link>
+              <a href="https://poker.privatepay.site" className="text-sm text-slate-400 hover:text-slate-300 transition-colors">Website</a>
+              <a href="https://github.com/ck2010317/Privatemagic" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-400 hover:text-slate-300 transition-colors">GitHub →</a>
             </div>
           </div>
         </main>
