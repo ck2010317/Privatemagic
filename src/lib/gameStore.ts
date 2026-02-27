@@ -92,6 +92,7 @@ export interface GameState {
   // On-chain state
   isOnChain: boolean;
   isDelegated: boolean;
+  player2JoinedOnChain: boolean;
   txHistory: GameTransaction[];
   txPending: boolean;
   txError: string | null;
@@ -182,6 +183,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   // On-chain state
   isOnChain: false,
   isDelegated: false,
+  player2JoinedOnChain: false,
   txHistory: [],
   txPending: false,
   txError: null,
@@ -490,7 +492,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       bettingPool: { totalPoolPlayer1: 0, totalPoolPlayer2: 0, bets: [], isSettled: false, winningPlayer: 0 },
       winner: null, winnerHandResult: null, isAnimating: false, showCards: false,
       lastAction: "", aiMessage: "", chatMessages: [],
-      isOnChain: false, isDelegated: false, txHistory: [], txPending: false, txError: null, gamePDA: null,
+      isOnChain: false, isDelegated: false, player2JoinedOnChain: false, txHistory: [], txPending: false, txError: null, gamePDA: null,
       walletBalanceBefore: 0, walletBalanceAfter: 0, settledOnChain: false,
     });
   },

@@ -169,6 +169,12 @@ function handleServerMessage(msg: Record<string, unknown>) {
       break;
     }
     
+    case "onchain_join_complete": {
+      console.log("[MP] Player 2 has paid on-chain buy-in");
+      useGameStore.setState({ player2JoinedOnChain: true });
+      break;
+    }
+
     case "error": {
       console.error("[MP] Server error:", msg.message);
       break;
@@ -238,6 +244,11 @@ export async function joinMultiplayerGame(roomCode: string, playerKey: string, p
 export function sendAction(action: string, raiseAmount?: number) {
   if (currentMode !== "multiplayer") return;
   sendMsg({ type: "action", action, raiseAmount });
+}
+
+export function sendOnChainJoinComplete() {
+  if (currentMode !== "multiplayer") return;
+  sendMsg({ type: "onchain_join_complete" });
 }
 
 export function sendDelegationComplete() {

@@ -529,6 +529,17 @@ wss.on("connection", (ws) => {
         break;
       }
       
+      case "onchain_join_complete": {
+        // Player 2 has paid on-chain buy-in — notify Player 1 so they can delegate
+        if (!currentRoom || playerIndex !== 1) return;
+        console.log(`[${clientId.slice(0,8)}] Player 2 on-chain join complete for room ${currentRoom.code}`);
+        const p1 = currentRoom.players[0];
+        if (p1 && p1.ws && p1.ws.readyState === 1) {
+          send(p1.ws, { type: "onchain_join_complete" });
+        }
+        break;
+      }
+
       case "delegation_complete": {
         if (!currentRoom || playerIndex < 0) return;
         currentRoom.isDelegated = true;

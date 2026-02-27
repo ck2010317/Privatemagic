@@ -7,7 +7,7 @@ import WalletMultiButton from "@/components/WalletButton";
 import { motion } from "framer-motion";
 import { useGameStore } from "@/lib/gameStore";
 import { solToLamports, lamportsToSol } from "@/lib/solana";
-import { createMultiplayerGame, joinMultiplayerGame, disconnect, sendDelegationComplete } from "@/lib/multiplayer";
+import { createMultiplayerGame, joinMultiplayerGame, disconnect, sendDelegationComplete, sendOnChainJoinComplete } from "@/lib/multiplayer";
 import {
   createOnChainGame,
   joinOnChainGame,
@@ -19,6 +19,7 @@ import {
   settleGameOnChain,
   cancelGameOnChain,
   refundBetOnChain,
+  retrySettlement,
   fetchGameState,
   getWalletBalance,
   getExplorerUrl,
@@ -36,7 +37,7 @@ import TransactionFeed from "@/components/TransactionFeed";
 export default function Home() {
   const { publicKey, connected, signTransaction, signAllTransactions } = useWallet();
   const { connection } = useConnection();
-  const { phase, mode, createGame, resetGame, isOnChain, isDelegated, txHistory, txPending, txError, onChainGameId, gamePDA, winner, pot, player1, player2, myPlayerIndex, settledOnChain } = useGameStore();
+  const { phase, mode, createGame, resetGame, isOnChain, isDelegated, player2JoinedOnChain, txHistory, txPending, txError, onChainGameId, gamePDA, winner, pot, player1, player2, myPlayerIndex, settledOnChain } = useGameStore();
 
   // Track whether we've already attempted delegation for this game
   const delegationAttempted = useRef(false);
@@ -61,6 +62,7 @@ export default function Home() {
       !player1 ||
       !player2 ||
       !publicKey ||
+      !player2JoinedOnChain || // Wait for Player 2's on-chain buy-in before delegating
       delegationAttempted.current
     ) return;
 
@@ -105,7 +107,7 @@ export default function Home() {
     // Small delay to let the join TX finalize
     const timer = setTimeout(doDelegation, 3000);
     return () => clearTimeout(timer);
-  }, [mode, isOnChain, isDelegated, onChainGameId, myPlayerIndex, player1, player2, phase, publicKey]);
+  }, [mode, isOnChain, isDelegated, onChainGameId, myPlayerIndex, player1, player2, phase, publicKey, player2JoinedOnChain]);
 
   // Reset delegation flag when going back to lobby
   useEffect(() => {
@@ -264,6 +266,8 @@ export default function Home() {
             solAmount: gameState.buyIn,
           });
           useGameStore.setState({ lastAction: "Buy-in paid! Game starting... 🎮" });
+          // Notify Player 1 that on-chain join is complete so they can delegate
+          sendOnChainJoinComplete();
         } else {
           console.error("⚠️ On-chain join failed:", result.error);
           useGameStore.setState({ txError: `On-chain buy-in failed: ${result.error}` });
@@ -326,8 +330,19 @@ export default function Home() {
             description: "Winner revealed on MagicBlock ER → committed to L1",
             timestamp: Date.now(),
           });
-          // ER reveal+settle already handles the pot transfer
-          useGameStore.setState({ settledOnChain: true, txPending: false, lastAction: "🏆 Winnings claimed via MagicBlock ER!" } as any);
+
+          if (revealResult.error === "UNDELEGATION_PENDING") {
+            // ER reveal succeeded but undelegation is slow — user can retry later
+            useGameStore.setState({
+              settledOnChain: false,
+              txPending: false,
+              lastAction: "⏳ Game committed on ER. Undelegation pending — click Retry to settle SOL.",
+              txError: "UNDELEGATION_PENDING",
+            } as any);
+          } else {
+            // Full settlement completed (reveal + settle on L1)
+            useGameStore.setState({ settledOnChain: true, txPending: false, lastAction: "🏆 Winnings claimed via MagicBlock ER!" } as any);
+          }
           return;
         } else {
           console.warn("⚠️ ER reveal failed, falling back to L1 settle:", revealResult.error);
@@ -356,6 +371,35 @@ export default function Home() {
     }
   };
 
+  const handleRetrySettlement = async () => {
+    if (!publicKey || !onChainGameId) return;
+    const wallet = getWalletAdapter();
+    if (!wallet) return;
+
+    const gameState = useGameStore.getState();
+    const winnerKey = gameState.winner;
+    if (!winnerKey || !gameState.player1 || !gameState.player2) return;
+
+    const winnerIndex = winnerKey === gameState.player1.publicKey ? 0 : 1;
+    const winnerPubkey = new PublicKey(winnerKey);
+    const loserPubkey = new PublicKey(winnerKey === gameState.player1.publicKey ? gameState.player2.publicKey : gameState.player1.publicKey);
+
+    useGameStore.setState({ txPending: true, txError: null, lastAction: "Retrying settlement..." });
+
+    const result = await retrySettlement(wallet, onChainGameId, winnerIndex, winnerPubkey, loserPubkey);
+    if (result.success) {
+      useGameStore.getState().addTransaction({
+        type: "settle",
+        signature: result.signature!,
+        description: "Winnings settled on L1 after undelegation",
+        timestamp: Date.now(),
+      });
+      useGameStore.setState({ settledOnChain: true, txPending: false, txError: null, lastAction: "🏆 Winnings claimed!" } as any);
+    } else {
+      useGameStore.setState({ txPending: false, txError: result.error || "Still pending" });
+    }
+  };
+
   const handleBackToLobby = () => {
     if (mode === "multiplayer") {
       disconnect();
@@ -366,7 +410,7 @@ export default function Home() {
       bettingPool: { totalPoolPlayer1: 0, totalPoolPlayer2: 0, bets: [], isSettled: false, winningPlayer: 0 },
       winner: null, winnerHandResult: null, isAnimating: false, showCards: false,
       lastAction: "", aiMessage: "", chatMessages: [],
-      isOnChain: false, isDelegated: false, txHistory: [], txPending: false, txError: null, gamePDA: null,
+      isOnChain: false, isDelegated: false, player2JoinedOnChain: false, txHistory: [], txPending: false, txError: null, gamePDA: null,
       walletBalanceBefore: 0, walletBalanceAfter: 0,
     });
   };
@@ -630,22 +674,25 @@ export default function Home() {
                       );
                     }
                     if (isWinner && !settledOnChain) {
+                      const isPendingUndelegation = txError === "UNDELEGATION_PENDING";
                       return (
                         <div className="flex flex-col items-center gap-2">
                           <motion.button
                             initial={{ opacity: 0, scale: 0.8 }}
                             animate={{ opacity: 1, scale: 1 }}
                             transition={{ delay: 1, type: "spring" }}
-                            onClick={handleClaimWinnings}
+                            onClick={isPendingUndelegation ? handleRetrySettlement : handleClaimWinnings}
                             disabled={txPending}
                             className="px-10 py-4 bg-gradient-to-r from-green-400 to-emerald-500 text-black font-black
                               rounded-2xl text-xl hover:from-green-300 hover:to-emerald-400 transition-all
                               shadow-lg shadow-green-500/30 animate-pulse disabled:opacity-50 disabled:animate-none"
                           >
-                            {txPending ? "⏳ Claiming..." : `💰 Claim ${lamportsToSol(pot)} SOL Winnings`}
+                            {txPending ? "⏳ Processing..." : isPendingUndelegation ? `🔄 Retry Settlement (${lamportsToSol(pot)} SOL)` : `💰 Claim ${lamportsToSol(pot)} SOL Winnings`}
                           </motion.button>
                           <p className="text-yellow-400/80 text-xs font-medium animate-pulse">
-                            ⚠️ You must claim your winnings before leaving!
+                            {isPendingUndelegation
+                              ? "⏳ ER committed. Waiting for undelegation — retry in a moment."
+                              : "⚠️ You must claim your winnings before leaving!"}
                           </p>
                         </div>
                       );

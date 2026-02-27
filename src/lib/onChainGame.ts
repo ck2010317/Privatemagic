@@ -515,12 +515,12 @@ export async function revealWinnerOnChain(
     console.log("✅ Winner revealed on ER (commit+undelegate scheduled): TX:", revealTxSig);
 
     // Wait for undelegation callback to complete
-    console.log("⏳ Waiting for MagicBlock ER undelegation (10-30s)...");
-    await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds initially
+    console.log("⏳ Waiting for MagicBlock ER undelegation...");
+    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds initially
 
-    // Poll to check if the game PDA is back to being owned by the program
+    // Poll to check if the game PDA is back to being owned by the program (up to ~2 minutes)
     let undelegated = false;
-    for (let attempt = 0; attempt < 8; attempt++) {
+    for (let attempt = 0; attempt < 24; attempt++) {
       try {
         const gameAccount = await connection.getAccountInfo(gamePDA);
         if (gameAccount && gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
@@ -528,7 +528,7 @@ export async function revealWinnerOnChain(
           undelegated = true;
           break;
         }
-        console.log(`⏳ Still waiting for undelegation (${(attempt + 1) * 5}s)...`);
+        console.log(`⏳ Still waiting for undelegation (${5 + (attempt + 1) * 5}s)...`);
         await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (e) {
         await new Promise(resolve => setTimeout(resolve, 5000));
@@ -536,9 +536,11 @@ export async function revealWinnerOnChain(
     }
 
     if (undelegated) {
-      // Game is already Settled from ER's reveal_winner — use settle_pot to transfer SOL
+      // Game is already Settled from ER's reveal_winner — use settle_game to transfer SOL
       console.log("💰 Settling pot on Solana L1 (game already settled by ER)...");
-      const settleTx = await settlePotOnChain(wallet, gameId, winnerPubkey);
+      const settleTx = await settleGameOnChain(
+        wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0
+      );
 
       if (currentGameState) {
         currentGameState.txSignatures.push(revealTxSig);
@@ -549,19 +551,19 @@ export async function revealWinnerOnChain(
 
       return settleTx;
     } else {
-      console.log("⚠️ Undelegation still pending after 50s. ER state is committed but L1 callback delayed.");
-      console.log("   The game result was recorded on the ER. Settlement will be possible once undelegation completes.");
-      
+      console.log("⚠️ Undelegation still pending. ER state committed but L1 callback delayed.");
+      console.log("   Use retrySettlement() when undelegation completes.");
+
       if (currentGameState) {
         currentGameState.txSignatures.push(revealTxSig);
         currentGameState.phase = "settled";
         currentGameState.winner = winnerPubkey.toString();
       }
 
-      return { 
-        success: true, 
+      return {
+        success: true,
         signature: revealTxSig,
-        error: "Game result committed to ER. L1 settlement pending undelegation callback." 
+        error: "UNDELEGATION_PENDING"
       };
     }
   } catch (err: any) {
@@ -782,6 +784,42 @@ export function getGameExplorerUrl(gameId: number): string {
 export async function verifyGameOnChain(gameId: number): Promise<boolean> {
   const state = await fetchGameState(gameId);
   return state !== null;
+}
+
+// =================== RETRY SETTLEMENT ===================
+
+/**
+ * Retry settlement after undelegation completes.
+ * Call this when reveal_winner on ER succeeded but undelegation was slow.
+ * Checks if the PDA is back on L1, then settles.
+ */
+export async function retrySettlement(
+  wallet: WalletAdapter,
+  gameId: number,
+  winnerIndex: number,
+  winnerPubkey: PublicKey,
+  loserPubkey: PublicKey
+): Promise<TransactionResult> {
+  try {
+    const [gamePDA] = getGamePDA(BigInt(gameId));
+
+    // Check if game PDA is back on L1
+    const gameAccount = await connection.getAccountInfo(gamePDA);
+    if (!gameAccount) {
+      return { success: false, error: "Game account not found" };
+    }
+
+    if (!gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
+      console.log("⏳ PDA still owned by delegation program, undelegation not complete yet");
+      return { success: false, error: "Undelegation still pending. Try again in a minute." };
+    }
+
+    console.log("✅ PDA is back on L1! Settling now...");
+    return await settleGameOnChain(wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0);
+  } catch (err: any) {
+    console.error("❌ Retry settlement failed:", err);
+    return { success: false, error: err.message };
+  }
 }
 
 // =================== FUND RECOVERY ===================
