@@ -829,20 +829,28 @@ export async function retrySettlement(
   try {
     const [gamePDA] = getGamePDA(BigInt(gameId));
 
-    // Check if game PDA is back on L1
-    const gameAccount = await connection.getAccountInfo(gamePDA);
-    if (!gameAccount) {
-      return { success: false, error: "Game account not found" };
+    // Poll a few times (up to ~15s) to give undelegation a chance
+    for (let i = 0; i < 3; i++) {
+      const gameAccount = await connection.getAccountInfo(gamePDA);
+      if (!gameAccount) {
+        return { success: false, error: "Game account not found" };
+      }
+
+      if (gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
+        // After reveal_winner, phase is Settled — use settle_pot (NOT settle_game)
+        console.log("✅ PDA is back on L1! Settling pot now...");
+        erRevealSent = false;
+        return await settlePotOnChain(wallet, gameId, winnerPubkey);
+      }
+
+      if (i < 2) {
+        console.log(`⏳ PDA still delegated, checking again in 5s... (${i + 1}/3)`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
     }
 
-    if (!gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
-      console.log("⏳ PDA still owned by delegation program, undelegation not complete yet");
-      return { success: false, error: "Undelegation still pending. Try again in a minute." };
-    }
-
-    // After reveal_winner, phase is Settled — use settle_pot (NOT settle_game)
-    console.log("✅ PDA is back on L1! Settling pot now...");
-    return await settlePotOnChain(wallet, gameId, winnerPubkey);
+    console.log("⏳ PDA still owned by delegation program, undelegation not complete yet");
+    return { success: false, error: "Undelegation still pending. Try again in a moment." };
   } catch (err: any) {
     console.error("❌ Retry settlement failed:", err);
     return { success: false, error: err.message };

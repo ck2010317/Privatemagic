@@ -284,6 +284,7 @@ export default function Home() {
   };
 
   const handleNewGame = () => {
+    resetErRevealFlag();
     if (mode === "multiplayer") {
       resetGame();
     } else {
