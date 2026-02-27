@@ -14,7 +14,7 @@
 ## Quick Start
 
 ### Play Now (AI Mode)
-👉 https://privatepoker.vercel.app
+👉 https://poker.privatepay.site
 
 Connect any Solana wallet → Create game → Play vs AI 🤖
 

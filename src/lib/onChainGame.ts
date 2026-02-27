@@ -518,9 +518,9 @@ export async function revealWinnerOnChain(
     console.log("⏳ Waiting for MagicBlock ER undelegation...");
     await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds initially
 
-    // Poll to check if the game PDA is back to being owned by the program (up to ~2 minutes)
+    // Poll to check if the game PDA is back to being owned by the program (up to ~30s)
     let undelegated = false;
-    for (let attempt = 0; attempt < 24; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const gameAccount = await connection.getAccountInfo(gamePDA);
         if (gameAccount && gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
@@ -536,11 +536,10 @@ export async function revealWinnerOnChain(
     }
 
     if (undelegated) {
-      // Game is already Settled from ER's reveal_winner — use settle_game to transfer SOL
+      // Game phase is Settled from ER's reveal_winner — use settle_pot (NOT settle_game)
+      // settle_pot requires phase == Settled, settle_game requires phase != Settled
       console.log("💰 Settling pot on Solana L1 (game already settled by ER)...");
-      const settleTx = await settleGameOnChain(
-        wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0
-      );
+      const settleTx = await settlePotOnChain(wallet, gameId, winnerPubkey);
 
       if (currentGameState) {
         currentGameState.txSignatures.push(revealTxSig);
@@ -551,8 +550,8 @@ export async function revealWinnerOnChain(
 
       return settleTx;
     } else {
-      console.log("⚠️ Undelegation still pending. ER state committed but L1 callback delayed.");
-      console.log("   Use retrySettlement() when undelegation completes.");
+      console.log("⚠️ Undelegation pending — MagicBlock devnet callback delayed.");
+      console.log("   Game result committed on ER. Use Retry Settlement when ready.");
 
       if (currentGameState) {
         currentGameState.txSignatures.push(revealTxSig);
@@ -796,9 +795,7 @@ export async function verifyGameOnChain(gameId: number): Promise<boolean> {
 export async function retrySettlement(
   wallet: WalletAdapter,
   gameId: number,
-  winnerIndex: number,
-  winnerPubkey: PublicKey,
-  loserPubkey: PublicKey
+  winnerPubkey: PublicKey
 ): Promise<TransactionResult> {
   try {
     const [gamePDA] = getGamePDA(BigInt(gameId));
@@ -814,8 +811,9 @@ export async function retrySettlement(
       return { success: false, error: "Undelegation still pending. Try again in a minute." };
     }
 
-    console.log("✅ PDA is back on L1! Settling now...");
-    return await settleGameOnChain(wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0);
+    // After reveal_winner, phase is Settled — use settle_pot (NOT settle_game)
+    console.log("✅ PDA is back on L1! Settling pot now...");
+    return await settlePotOnChain(wallet, gameId, winnerPubkey);
   } catch (err: any) {
     console.error("❌ Retry settlement failed:", err);
     return { success: false, error: err.message };
