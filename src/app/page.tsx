@@ -20,6 +20,7 @@ import {
   cancelGameOnChain,
   refundBetOnChain,
   retrySettlement,
+  resetErRevealFlag,
   fetchGameState,
   getWalletBalance,
   getExplorerUrl,
@@ -394,7 +395,8 @@ export default function Home() {
       });
       useGameStore.setState({ settledOnChain: true, txPending: false, txError: null, lastAction: "🏆 Winnings claimed!" } as any);
     } else {
-      useGameStore.setState({ txPending: false, txError: result.error || "Still pending" });
+      // Keep UNDELEGATION_PENDING status so button stays in retry mode (not "Claim" which re-sends reveal_winner)
+      useGameStore.setState({ txPending: false, txError: "UNDELEGATION_PENDING", lastAction: "⏳ " + (result.error || "Still pending — try again in a moment.") });
     }
   };
 
@@ -402,6 +404,7 @@ export default function Home() {
     if (mode === "multiplayer") {
       disconnect();
     }
+    resetErRevealFlag();
     useGameStore.setState({
       gameId: "", onChainGameId: null, phase: "lobby", mode: "ai", pot: 0, buyIn: 0, currentBet: 0, dealer: 0, turn: 0,
       communityCards: [], deck: [], player1: null, player2: null, myPlayerIndex: -1,

@@ -108,9 +108,14 @@ function getReadOnlyProgram(): Program {
 // =================== GAME STATE TRACKING ===================
 
 let currentGameState: OnChainGameState | null = null;
+let erRevealSent = false; // Prevent duplicate reveal_winner calls to ER
 
 export function getCurrentOnChainState(): OnChainGameState | null {
   return currentGameState;
+}
+
+export function resetErRevealFlag() {
+  erRevealSent = false;
 }
 
 // =================== CORE GAME FUNCTIONS ===================
@@ -464,6 +469,27 @@ export async function revealWinnerOnChain(
   const winnerPubkey = winnerIndex === 0 ? player1Pubkey : (winnerIndex === 1 ? player2Pubkey : wallet.publicKey);
   const loserPubkey = winnerIndex === 0 ? player2Pubkey : player1Pubkey;
 
+  // If reveal was already sent to ER, skip straight to polling for undelegation
+  if (erRevealSent) {
+    console.log("🔄 reveal_winner already sent to ER — checking undelegation status...");
+    const [gamePDA] = getGamePDA(BigInt(gameId));
+
+    try {
+      const gameAccount = await connection.getAccountInfo(gamePDA);
+      if (gameAccount && gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
+        console.log("✅ PDA back on L1! Settling pot...");
+        erRevealSent = false;
+        return await settlePotOnChain(wallet, gameId, winnerPubkey);
+      }
+    } catch (e) { /* continue */ }
+
+    return {
+      success: true,
+      signature: "",
+      error: "UNDELEGATION_PENDING",
+    };
+  }
+
   // First, try to settle directly on L1 (works if game is not delegated or already undelegated)
   try {
     console.log("🏆 Attempting direct L1 settlement...");
@@ -512,15 +538,18 @@ export async function revealWinnerOnChain(
       skipPreflight: true,
     });
 
+    // Mark that reveal was sent — prevent duplicate ER calls
+    erRevealSent = true;
+
     console.log("✅ Winner revealed on ER (commit+undelegate scheduled): TX:", revealTxSig);
 
     // Wait for undelegation callback to complete
     console.log("⏳ Waiting for MagicBlock ER undelegation...");
     await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds initially
 
-    // Poll to check if the game PDA is back to being owned by the program (up to ~30s)
+    // Poll to check if the game PDA is back to being owned by the program (up to ~60s)
     let undelegated = false;
-    for (let attempt = 0; attempt < 5; attempt++) {
+    for (let attempt = 0; attempt < 11; attempt++) {
       try {
         const gameAccount = await connection.getAccountInfo(gamePDA);
         if (gameAccount && gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
