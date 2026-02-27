@@ -562,12 +562,28 @@ export async function revealWinnerOnChain(
 
     console.log("✅ Winner revealed on ER (commit+undelegate scheduled): TX:", revealTxSig);
 
+    // === Step 0: Wait for ER to confirm TX, then dump logs for debugging ===
+    console.log("⏳ Waiting for ER TX confirmation...");
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    try {
+      const erTxInfo = await erConnection.getTransaction(revealTxSig, { maxSupportedTransactionVersion: 0 });
+      if (erTxInfo?.meta) {
+        console.log("📋 ER TX logs for reveal_winner:", JSON.stringify(erTxInfo.meta.logMessages, null, 2));
+        if (erTxInfo.meta.err) {
+          console.log("❌ ER TX had error:", JSON.stringify(erTxInfo.meta.err));
+        }
+      } else {
+        console.log("⚠️ Could not fetch ER TX info (null meta)");
+      }
+    } catch (logErr: any) {
+      console.log("⚠️ Could not fetch ER TX logs:", logErr.message);
+    }
+
     // === Step 1: Use GetCommitmentSignature to track the L1 commitment ===
     console.log("⏳ Tracking L1 commitment via GetCommitmentSignature...");
     let l1CommitSig: string | null = null;
     try {
-      // Wait a moment for ER to process the scheduling
-      await new Promise(resolve => setTimeout(resolve, 3000));
       l1CommitSig = await GetCommitmentSignature(revealTxSig, erConnection);
       console.log("✅ L1 commitment confirmed! Signature:", l1CommitSig);
     } catch (commitErr: any) {
@@ -706,8 +722,21 @@ async function sendCommitAndUndelegateRetry(
 
   console.log("✅ Commit+undelegate instruction sent to ER:", txSig);
 
+  // Wait for ER to process, then dump logs
+  await new Promise(resolve => setTimeout(resolve, 5000));
+  try {
+    const retryTxInfo = await erConnection.getTransaction(txSig, { maxSupportedTransactionVersion: 0 });
+    if (retryTxInfo?.meta) {
+      console.log("📋 SDK retry TX logs:", JSON.stringify(retryTxInfo.meta.logMessages, null, 2));
+      if (retryTxInfo.meta.err) {
+        console.log("❌ SDK retry TX had error:", JSON.stringify(retryTxInfo.meta.err));
+      }
+    }
+  } catch (logErr: any) {
+    console.log("⚠️ Could not fetch retry TX logs:", logErr.message);
+  }
+
   // Use GetCommitmentSignature to track the L1 commitment
-  await new Promise(resolve => setTimeout(resolve, 3000));
   try {
     const l1Sig = await GetCommitmentSignature(txSig, erConnection);
     console.log("✅ L1 commitment confirmed from retry:", l1Sig);
