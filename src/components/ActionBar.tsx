@@ -9,7 +9,7 @@ interface ActionBarProps {
 }
 
 export default function ActionBar({ disabled }: ActionBarProps) {
-  const { phase, currentBet, buyIn, turn, myPlayerIndex, player1, player2, performAction } =
+  const { phase, currentBet, buyIn, turn, myPlayerIndex, player1, player2, performAction, isOnChain, isDelegated } =
     useGameStore();
   const [raiseAmount, setRaiseAmount] = useState(0);
   const [showRaiseSlider, setShowRaiseSlider] = useState(false);
@@ -34,7 +34,7 @@ export default function ActionBar({ disabled }: ActionBarProps) {
           className="px-6 py-3 bg-gray-800/50 rounded-2xl border border-gray-700"
         >
           <span className="text-gray-400 text-sm">
-            {myPlayerIndex === -1 ? "👁️ Spectating..." : "⏳ Waiting for opponent..."}
+            {myPlayerIndex === -1 ? "👁️ Spectating..." : (isOnChain && !isDelegated) ? "🔮 Setting up MagicBlock ER..." : "⏳ Waiting for opponent..."}
           </span>
         </motion.div>
       </div>

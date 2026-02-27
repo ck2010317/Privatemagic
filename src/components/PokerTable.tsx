@@ -23,6 +23,7 @@ export default function PokerTable() {
     isAnimating,
     aiMessage,
     isOnChain,
+    isDelegated,
     txPending,
     buyIn,
   } = useGameStore();
@@ -270,7 +271,7 @@ export default function PokerTable() {
 
       {/* Action Bar (below table) */}
       <div className="mt-4 relative z-50">
-        <ActionBar disabled={isAnimating} />
+        <ActionBar disabled={isAnimating || (isOnChain && !isDelegated)} />
       </div>
     </div>
   );
