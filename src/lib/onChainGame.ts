@@ -16,7 +16,7 @@
  *   8. Settle pot → Solana L1 (transfers SOL to winner)
  */
 
-import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, TransactionInstruction, SystemProgram } from "@solana/web3.js";
+import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, SystemProgram } from "@solana/web3.js";
 import { Program, AnchorProvider, BN, Idl } from "@coral-xyz/anchor";
 import {
   PROGRAM_ID,
@@ -32,36 +32,6 @@ import {
 } from "./solana";
 import IDL from "./privatepoker_idl.json";
 
-// MagicBlock Magic Program constants
-const MAGIC_PROGRAM_ID = new PublicKey("Magic11111111111111111111111111111111111111");
-const MAGIC_CONTEXT_ID = new PublicKey("MagicContext1111111111111111111111111111111");
-
-/**
- * Custom createCommitAndUndelegateInstruction — fixes the SDK bug where
- * accounts are passed as isWritable: false. The Magic Program requires
- * them to be writable for undelegation.
- */
-function createCommitAndUndelegateIx(
-  payer: PublicKey,
-  accountsToCommitAndUndelegate: PublicKey[]
-): TransactionInstruction {
-  const keys = [
-    { pubkey: payer, isSigner: true, isWritable: true },
-    { pubkey: MAGIC_CONTEXT_ID, isSigner: false, isWritable: true },
-    ...accountsToCommitAndUndelegate.map((account) => ({
-      pubkey: account,
-      isSigner: false,
-      isWritable: true, // FIXED: SDK passes false, Magic Program needs true
-    })),
-  ];
-  const data = Buffer.alloc(4);
-  data.writeUInt32LE(2, 0); // discriminator for commit+undelegate
-  return new TransactionInstruction({
-    keys,
-    programId: MAGIC_PROGRAM_ID,
-    data,
-  });
-}
 
 // =================== TYPES ===================
 
@@ -485,13 +455,12 @@ export async function advancePhaseOnChain(
 /**
  * Settle the game after it ends.
  *
- * NEW APPROACH (fixes InvalidPhase bug):
- * - Game actions (check, allin, fold) only go through the WebSocket server,
- *   NOT as on-chain instructions to the ER program. So the ER game state
- *   stays in PreFlop and reveal_winner always fails with InvalidPhase.
- * - Instead, we SKIP reveal_winner entirely and:
- *   1. Force-commit+undelegate all 3 PDAs from ER back to L1 via Magic Program
- *   2. Call settle_game on L1 (works from ANY phase except Settled)
+ * Flow:
+ *   1. Try direct L1 settlement (works if not delegated or already undelegated)
+ *   2. advance_phase × 4 on ER (PreFlop → Showdown) — no player actions needed
+ *   3. reveal_winner on ER — sets winner + fires commit_and_undelegate_accounts
+ *   4. Poll for PDA ownership to return to our program on L1
+ *   5. settle_pot on L1 — transfers SOL to winner
  */
 export async function revealWinnerOnChain(
   wallet: WalletAdapter,
@@ -505,34 +474,92 @@ export async function revealWinnerOnChain(
   const [gamePDA] = getGamePDA(BigInt(gameId));
   const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
   const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
+  const gameIdBN = new BN(gameId);
 
   // === Step 1: Try direct L1 settlement (works if already undelegated) ===
   try {
-    console.log("🏆 Attempting direct L1 settlement...");
-    const directResult = await settleGameOnChain(wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0);
+    console.log("🏆 Attempting direct L1 settle_pot...");
+    const directResult = await settlePotOnChain(wallet, gameId, winnerPubkey);
     if (directResult.success) {
-      console.log("✅ Direct L1 settlement succeeded!");
+      console.log("✅ Direct L1 settle_pot succeeded!");
       erRevealSent = false;
       return directResult;
     }
   } catch (directErr: any) {
-    console.log("Direct L1 failed (game likely delegated):", directErr.message?.slice(0, 100));
-  }
-
-  // === Step 2: Force-commit+undelegate PDAs from ER via Magic Program ===
-  console.log("🔄 Force-committing + undelegating PDAs from ER via Magic Program...");
-  try {
-    const undelegateTxSig = await sendForceUndelegate(wallet, gamePDA, hand1PDA, hand2PDA);
-    if (undelegateTxSig) {
-      console.log("✅ Force-undelegate TX sent:", undelegateTxSig);
-      erRevealSent = true;
-      lastRevealTxSig = undelegateTxSig;
+    // Try settle_game as fallback (works from any phase)
+    try {
+      const fallback = await settleGameOnChain(wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0);
+      if (fallback.success) {
+        console.log("✅ Direct L1 settle_game succeeded!");
+        erRevealSent = false;
+        return fallback;
+      }
+    } catch (e: any) {
+      console.log("Direct L1 failed (game likely delegated):", e.message?.slice(0, 100));
     }
-  } catch (undelegateErr: any) {
-    console.log("⚠️ Force-undelegate TX failed:", undelegateErr.message);
   }
 
-  // === Step 3: Poll for PDA ownership to return to our program (up to ~45s) ===
+  // === Step 2: advance_phase × 4 on ER to reach Showdown ===
+  console.log("⏭️ Advancing ER game state to Showdown...");
+  const erProgram = getERProgram(wallet);
+  const phases = ["Flop", "Turn", "River", "Showdown"];
+  for (const phase of phases) {
+    try {
+      const tx = await erProgram.methods
+        .advancePhase(gameIdBN)
+        .accounts({ game: gamePDA, payer: wallet.publicKey })
+        .rpc();
+      console.log(`✅ Advanced to ${phase}: ${tx.slice(0, 16)}...`);
+    } catch (e: any) {
+      // May already be past this phase — continue
+      console.log(`⚠️ advance_phase to ${phase}: ${e.message?.slice(0, 80)}`);
+    }
+  }
+
+  // === Step 3: reveal_winner on ER (commit+undelegate) ===
+  console.log("🏆 Calling reveal_winner on ER...");
+  try {
+    const revealIx = await erProgram.methods
+      .revealWinner(winnerIndex)
+      .accounts({
+        game: gamePDA,
+        player1Hand: hand1PDA,
+        player2Hand: hand2PDA,
+        payer: wallet.publicKey,
+      })
+      .instruction();
+
+    const recentBlockhash = (await erConnection.getLatestBlockhash()).blockhash;
+    const revealTx = new Transaction({ recentBlockhash, feePayer: wallet.publicKey });
+    revealTx.add(revealIx);
+
+    const signedRevealTx = await wallet.signTransaction(revealTx);
+    const revealTxSig = await erConnection.sendRawTransaction(signedRevealTx.serialize(), {
+      skipPreflight: true,
+    });
+
+    erRevealSent = true;
+    lastRevealTxSig = revealTxSig;
+    console.log("✅ reveal_winner TX sent:", revealTxSig);
+
+    // Wait and dump logs
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    try {
+      const txInfo = await erConnection.getTransaction(revealTxSig, { maxSupportedTransactionVersion: 0 });
+      if (txInfo?.meta) {
+        console.log("📋 reveal_winner TX logs:", JSON.stringify(txInfo.meta.logMessages, null, 2));
+        if (txInfo.meta.err) {
+          console.log("❌ reveal_winner TX error:", JSON.stringify(txInfo.meta.err));
+        }
+      }
+    } catch (logErr: any) {
+      console.log("⚠️ Could not fetch TX logs:", logErr.message);
+    }
+  } catch (revealErr: any) {
+    console.log("⚠️ reveal_winner failed:", revealErr.message?.slice(0, 100));
+  }
+
+  // === Step 4: Poll for PDA ownership to return to our program (up to ~45s) ===
   console.log("⏳ Waiting for PDAs to return to L1...");
   for (let attempt = 0; attempt < 9; attempt++) {
     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -542,8 +569,8 @@ export async function revealWinnerOnChain(
         console.log(`✅ Game PDA back on L1 after ${(attempt + 1) * 5}s!`);
         erRevealSent = false;
 
-        // Settle on L1
-        const settleTx = await settleGameOnChain(wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0);
+        // reveal_winner set phase=Settled, so use settle_pot
+        const settleTx = await settlePotOnChain(wallet, gameId, winnerPubkey);
         if (currentGameState) {
           if (settleTx.signature) currentGameState.txSignatures.push(settleTx.signature);
           currentGameState.phase = "settled";
@@ -554,14 +581,6 @@ export async function revealWinnerOnChain(
       console.log(`⏳ PDA still delegated (poll ${attempt + 1}/9)...`);
     } catch (e) {
       console.log(`⏳ Poll error (${attempt + 1}/9), retrying...`);
-    }
-
-    // On attempt 4, try sending another force-undelegate as a nudge
-    if (attempt === 4) {
-      console.log("🔄 Sending another force-undelegate nudge...");
-      try {
-        await sendForceUndelegate(wallet, gamePDA, hand1PDA, hand2PDA);
-      } catch (e) { /* ignore */ }
     }
   }
 
@@ -577,56 +596,6 @@ export async function revealWinnerOnChain(
     signature: lastRevealTxSig || "",
     error: "UNDELEGATION_PENDING"
   };
-}
-
-/**
- * Send a force commit+undelegate instruction to the ER Magic Program.
- * Uses our custom instruction with writable accounts (fixes SDK bug).
- * Returns the TX signature if successful, null otherwise.
- */
-async function sendForceUndelegate(
-  wallet: WalletAdapter,
-  gamePDA: PublicKey,
-  hand1PDA: PublicKey,
-  hand2PDA: PublicKey
-): Promise<string | null> {
-  console.log("🔄 Sending force commit+undelegate to ER Magic Program...");
-  console.log("   Accounts:", [gamePDA, hand1PDA, hand2PDA].map(p => p.toBase58()));
-
-  const ix = createCommitAndUndelegateIx(
-    wallet.publicKey,
-    [gamePDA, hand1PDA, hand2PDA]
-  );
-
-  const recentBlockhash = (await erConnection.getLatestBlockhash()).blockhash;
-  const tx = new Transaction({ recentBlockhash, feePayer: wallet.publicKey });
-  tx.add(ix);
-
-  const signedTx = await wallet.signTransaction(tx);
-  const txSig = await erConnection.sendRawTransaction(signedTx.serialize(), {
-    skipPreflight: true,
-  });
-
-  console.log("✅ Force commit+undelegate TX sent to ER:", txSig);
-
-  // Wait for ER to process, then dump logs for debugging
-  await new Promise(resolve => setTimeout(resolve, 5000));
-  try {
-    const txInfo = await erConnection.getTransaction(txSig, { maxSupportedTransactionVersion: 0 });
-    if (txInfo?.meta) {
-      console.log("📋 Force-undelegate TX logs:", JSON.stringify(txInfo.meta.logMessages, null, 2));
-      if (txInfo.meta.err) {
-        console.log("❌ Force-undelegate TX had error:", JSON.stringify(txInfo.meta.err));
-        return null;
-      }
-    } else {
-      console.log("⚠️ Could not fetch TX info yet (null meta)");
-    }
-  } catch (logErr: any) {
-    console.log("⚠️ Could not fetch TX logs:", logErr.message);
-  }
-
-  return txSig;
 }
 
 /**
@@ -874,19 +843,39 @@ export async function retrySettlement(
     if (gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
       console.log("✅ PDA is back on L1! Settling now...");
       erRevealSent = false;
-      return await settleGameOnChain(wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0);
+      return await settlePotOnChain(wallet, gameId, winnerPubkey);
     }
 
-    // PDA still delegated — send force-undelegate
+    // PDA still delegated — advance phases + reveal_winner on ER
     if (player1Pubkey && player2Pubkey) {
-      const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
-      const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
-
-      console.log("🔄 Force-undelegating PDAs via Magic Program...");
+      console.log("🔄 Advancing ER phases + reveal_winner...");
       try {
-        await sendForceUndelegate(wallet, gamePDA, hand1PDA, hand2PDA);
+        const erProgram = getERProgram(wallet);
+        const gameIdBN = new BN(gameId);
+        const [gPDA] = getGamePDA(BigInt(gameId));
+        const [h1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
+        const [h2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
+
+        // advance_phase × 4
+        for (const phase of ["Flop", "Turn", "River", "Showdown"]) {
+          try {
+            await erProgram.methods.advancePhase(gameIdBN).accounts({ game: gPDA, payer: wallet.publicKey }).rpc();
+            console.log(`✅ Advanced to ${phase}`);
+          } catch (e) { /* may already be past this phase */ }
+        }
+
+        // reveal_winner
+        const rIx = await erProgram.methods.revealWinner(winnerIndex)
+          .accounts({ game: gPDA, player1Hand: h1PDA, player2Hand: h2PDA, payer: wallet.publicKey })
+          .instruction();
+        const bh = (await erConnection.getLatestBlockhash()).blockhash;
+        const rTx = new Transaction({ recentBlockhash: bh, feePayer: wallet.publicKey });
+        rTx.add(rIx);
+        const signed = await wallet.signTransaction(rTx);
+        await erConnection.sendRawTransaction(signed.serialize(), { skipPreflight: true });
+        console.log("✅ reveal_winner sent on ER");
       } catch (sdkErr: any) {
-        console.log("⚠️ Force-undelegate failed:", sdkErr.message);
+        console.log("⚠️ ER retry failed:", sdkErr.message);
       }
     }
 
@@ -897,7 +886,7 @@ export async function retrySettlement(
       if (pollAccount && pollAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
         console.log("✅ PDA back on L1! Settling...");
         erRevealSent = false;
-        return await settleGameOnChain(wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0);
+        return await settlePotOnChain(wallet, gameId, winnerPubkey);
       }
       console.log(`⏳ PDA still delegated (poll ${i + 1}/6)...`);
     }

@@ -489,6 +489,30 @@ pub mod privatepoker {
         Ok(())
     }
 
+    /// Force-close: commit+undelegate PDAs from ER back to L1 WITHOUT checking game phase.
+    /// Used when game was played via WebSocket (not on-chain ER instructions).
+    pub fn force_close(ctx: Context<ForceClose>) -> Result<()> {
+        let game = &mut ctx.accounts.game;
+        msg!("Force-closing game {} (phase: {:?})", game.game_id, game.phase);
+
+        // Serialize ALL accounts before commit+undelegate
+        game.exit(&crate::ID)?;
+        ctx.accounts.player1_hand.exit(&crate::ID)?;
+        ctx.accounts.player2_hand.exit(&crate::ID)?;
+        commit_and_undelegate_accounts(
+            &ctx.accounts.payer,
+            vec![
+                &ctx.accounts.game.to_account_info(),
+                &ctx.accounts.player1_hand.to_account_info(),
+                &ctx.accounts.player2_hand.to_account_info(),
+            ],
+            &ctx.accounts.magic_context,
+            &ctx.accounts.magic_program,
+        )?;
+
+        Ok(())
+    }
+
     // =================== FUND RECOVERY ===================
 
     /// Cancel a game that hasn't started yet — Player 1 gets full refund
@@ -698,6 +722,32 @@ pub struct AdvancePhase<'info> {
         bump
     )]
     pub game: Account<'info, Game>,
+
+    #[account(mut)]
+    pub payer: Signer<'info>,
+}
+
+/// ForceClose — commit+undelegate from ER without checking phase
+/// Used when game is played via WebSocket, not on-chain ER instructions
+#[commit]
+#[derive(Accounts)]
+pub struct ForceClose<'info> {
+    #[account(mut, seeds = [GAME_SEED, &game.game_id.to_le_bytes()], bump)]
+    pub game: Account<'info, Game>,
+
+    #[account(
+        mut,
+        seeds = [PLAYER_HAND_SEED, &game.game_id.to_le_bytes(), game.player1.unwrap().as_ref()],
+        bump
+    )]
+    pub player1_hand: Account<'info, PlayerHand>,
+
+    #[account(
+        mut,
+        seeds = [PLAYER_HAND_SEED, &game.game_id.to_le_bytes(), game.player2.unwrap().as_ref()],
+        bump
+    )]
+    pub player2_hand: Account<'info, PlayerHand>,
 
     #[account(mut)]
     pub payer: Signer<'info>,
