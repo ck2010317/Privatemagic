@@ -383,10 +383,12 @@ export default function Home() {
     if (!winnerKey || !gameState.player1 || !gameState.player2) return;
 
     const winnerPubkey = new PublicKey(winnerKey);
+    const p1Pubkey = new PublicKey(gameState.player1.publicKey);
+    const p2Pubkey = new PublicKey(gameState.player2.publicKey);
 
     useGameStore.setState({ txPending: true, txError: null, lastAction: "Retrying settlement..." });
 
-    const result = await retrySettlement(wallet, onChainGameId, winnerPubkey);
+    const result = await retrySettlement(wallet, onChainGameId, winnerPubkey, p1Pubkey, p2Pubkey);
     if (result.success) {
       useGameStore.getState().addTransaction({
         type: "settle",

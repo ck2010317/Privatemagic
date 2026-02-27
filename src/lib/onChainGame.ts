@@ -19,6 +19,10 @@
 import { Connection, PublicKey, LAMPORTS_PER_SOL, Transaction, SystemProgram, VersionedTransaction } from "@solana/web3.js";
 import { Program, AnchorProvider, BN, Idl } from "@coral-xyz/anchor";
 import {
+  GetCommitmentSignature,
+  createCommitAndUndelegateInstruction,
+} from "@magicblock-labs/ephemeral-rollups-sdk";
+import {
   PROGRAM_ID,
   DEVNET_RPC,
   TEE_URL,
@@ -109,6 +113,7 @@ function getReadOnlyProgram(): Program {
 
 let currentGameState: OnChainGameState | null = null;
 let erRevealSent = false; // Prevent duplicate reveal_winner calls to ER
+let lastRevealTxSig: string | null = null; // Track last ER reveal TX for retry
 
 export function getCurrentOnChainState(): OnChainGameState | null {
   return currentGameState;
@@ -454,10 +459,9 @@ export async function advancePhaseOnChain(
  * Reveal winner on MagicBlock ER.
  * This commits the game state back to Solana L1 and undelegates from ER.
  * After undelegation completes, accounts are owned by the program again and can be settled.
- * 
- * NOTE: MagicBlock devnet undelegation callback can be slow/unreliable.
- * If the ER reveal succeeds but undelegation doesn't propagate, we fall back to
- * creating a new (non-delegated) game and settling it on L1 directly.
+ *
+ * Uses MagicBlock SDK's GetCommitmentSignature to properly track the L1 commitment,
+ * and createCommitAndUndelegateInstruction as a retry mechanism.
  */
 export async function revealWinnerOnChain(
   wallet: WalletAdapter,
@@ -468,12 +472,15 @@ export async function revealWinnerOnChain(
 ): Promise<TransactionResult> {
   const winnerPubkey = winnerIndex === 0 ? player1Pubkey : (winnerIndex === 1 ? player2Pubkey : wallet.publicKey);
   const loserPubkey = winnerIndex === 0 ? player2Pubkey : player1Pubkey;
+  const [gamePDA] = getGamePDA(BigInt(gameId));
+  const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
+  const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
 
-  // If reveal was already sent to ER, skip straight to polling for undelegation
+  // If reveal was already sent to ER, try re-triggering commit+undelegate via SDK
   if (erRevealSent) {
-    console.log("🔄 reveal_winner already sent to ER — checking undelegation status...");
-    const [gamePDA] = getGamePDA(BigInt(gameId));
+    console.log("🔄 reveal_winner already sent to ER — attempting SDK commit+undelegate retry...");
 
+    // First check if PDA already came back
     try {
       const gameAccount = await connection.getAccountInfo(gamePDA);
       if (gameAccount && gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
@@ -482,6 +489,20 @@ export async function revealWinnerOnChain(
         return await settlePotOnChain(wallet, gameId, winnerPubkey);
       }
     } catch (e) { /* continue */ }
+
+    // Try client-side createCommitAndUndelegateInstruction as retry
+    try {
+      const retryResult = await sendCommitAndUndelegateRetry(wallet, gamePDA, hand1PDA, hand2PDA);
+      if (retryResult) {
+        console.log("✅ SDK commit+undelegate retry succeeded! L1 signature:", retryResult);
+        // Wait a moment for L1 to process
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        erRevealSent = false;
+        return await settlePotOnChain(wallet, gameId, winnerPubkey);
+      }
+    } catch (retryErr: any) {
+      console.log("⚠️ SDK retry failed:", retryErr.message);
+    }
 
     return {
       success: true,
@@ -505,9 +526,6 @@ export async function revealWinnerOnChain(
   try {
     // Use ER program for reveal_winner (runs on MagicBlock ER with commit+undelegate)
     const erProgram = getERProgram(wallet);
-    const [gamePDA] = getGamePDA(BigInt(gameId));
-    const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
-    const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
 
     console.log("🏆 Revealing winner on MagicBlock ER (commit+undelegate to L1)...", {
       winnerIndex,
@@ -540,63 +558,163 @@ export async function revealWinnerOnChain(
 
     // Mark that reveal was sent — prevent duplicate ER calls
     erRevealSent = true;
+    lastRevealTxSig = revealTxSig;
 
     console.log("✅ Winner revealed on ER (commit+undelegate scheduled): TX:", revealTxSig);
 
-    // Wait for undelegation callback to complete
-    console.log("⏳ Waiting for MagicBlock ER undelegation...");
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds initially
+    // === Step 1: Use GetCommitmentSignature to track the L1 commitment ===
+    console.log("⏳ Tracking L1 commitment via GetCommitmentSignature...");
+    let l1CommitSig: string | null = null;
+    try {
+      // Wait a moment for ER to process the scheduling
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      l1CommitSig = await GetCommitmentSignature(revealTxSig, erConnection);
+      console.log("✅ L1 commitment confirmed! Signature:", l1CommitSig);
+    } catch (commitErr: any) {
+      console.log("⚠️ GetCommitmentSignature failed:", commitErr.message);
+      console.log("   Will try SDK retry and polling as fallback...");
+    }
 
-    // Poll to check if the game PDA is back to being owned by the program (up to ~60s)
-    let undelegated = false;
-    for (let attempt = 0; attempt < 11; attempt++) {
+    // === Step 2: If GetCommitmentSignature succeeded, wait for PDA ownership to return ===
+    if (l1CommitSig) {
+      // Wait for L1 to finalize the undelegation
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      // Quick check — PDA should be back on L1 now
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          const gameAccount = await connection.getAccountInfo(gamePDA);
+          if (gameAccount && gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
+            console.log("✅ Game PDA ownership returned to program!");
+            erRevealSent = false;
+
+            // Settle pot on L1
+            console.log("💰 Settling pot on Solana L1...");
+            const settleTx = await settlePotOnChain(wallet, gameId, winnerPubkey);
+
+            if (currentGameState) {
+              currentGameState.txSignatures.push(revealTxSig);
+              if (settleTx.signature) currentGameState.txSignatures.push(settleTx.signature);
+              currentGameState.phase = "settled";
+              currentGameState.winner = winnerPubkey.toString();
+            }
+
+            return settleTx;
+          }
+        } catch (e) { /* continue */ }
+        console.log(`⏳ Waiting for PDA ownership transfer (${(attempt + 1) * 3}s)...`);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+    }
+
+    // === Step 3: Fallback — try SDK createCommitAndUndelegateInstruction ===
+    console.log("🔄 Trying SDK createCommitAndUndelegateInstruction as fallback...");
+    try {
+      const retrySig = await sendCommitAndUndelegateRetry(wallet, gamePDA, hand1PDA, hand2PDA);
+      if (retrySig) {
+        console.log("✅ SDK commit+undelegate retry succeeded! L1 sig:", retrySig);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        // Check PDA ownership
+        const gameAccount = await connection.getAccountInfo(gamePDA);
+        if (gameAccount && gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
+          console.log("✅ PDA back on L1 after SDK retry!");
+          erRevealSent = false;
+          const settleTx = await settlePotOnChain(wallet, gameId, winnerPubkey);
+          if (currentGameState) {
+            currentGameState.txSignatures.push(revealTxSig);
+            if (settleTx.signature) currentGameState.txSignatures.push(settleTx.signature);
+            currentGameState.phase = "settled";
+            currentGameState.winner = winnerPubkey.toString();
+          }
+          return settleTx;
+        }
+      }
+    } catch (sdkErr: any) {
+      console.log("⚠️ SDK retry also failed:", sdkErr.message);
+    }
+
+    // === Step 4: Last resort — poll account owner (up to ~30s more) ===
+    console.log("⏳ Final fallback: polling account owner...");
+    for (let attempt = 0; attempt < 6; attempt++) {
       try {
         const gameAccount = await connection.getAccountInfo(gamePDA);
         if (gameAccount && gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
           console.log("✅ Game PDA ownership returned to program!");
-          undelegated = true;
-          break;
+          erRevealSent = false;
+          const settleTx = await settlePotOnChain(wallet, gameId, winnerPubkey);
+          if (currentGameState) {
+            currentGameState.txSignatures.push(revealTxSig);
+            if (settleTx.signature) currentGameState.txSignatures.push(settleTx.signature);
+            currentGameState.phase = "settled";
+            currentGameState.winner = winnerPubkey.toString();
+          }
+          return settleTx;
         }
-        console.log(`⏳ Still waiting for undelegation (${5 + (attempt + 1) * 5}s)...`);
+        console.log(`⏳ Still waiting for undelegation (poll ${attempt + 1}/6)...`);
         await new Promise(resolve => setTimeout(resolve, 5000));
       } catch (e) {
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }
 
-    if (undelegated) {
-      // Game phase is Settled from ER's reveal_winner — use settle_pot (NOT settle_game)
-      // settle_pot requires phase == Settled, settle_game requires phase != Settled
-      console.log("💰 Settling pot on Solana L1 (game already settled by ER)...");
-      const settleTx = await settlePotOnChain(wallet, gameId, winnerPubkey);
-
-      if (currentGameState) {
-        currentGameState.txSignatures.push(revealTxSig);
-        if (settleTx.signature) currentGameState.txSignatures.push(settleTx.signature);
-        currentGameState.phase = "settled";
-        currentGameState.winner = winnerPubkey.toString();
-      }
-
-      return settleTx;
-    } else {
-      console.log("⚠️ Undelegation pending — MagicBlock devnet callback delayed.");
-      console.log("   Game result committed on ER. Use Retry Settlement when ready.");
-
-      if (currentGameState) {
-        currentGameState.txSignatures.push(revealTxSig);
-        currentGameState.phase = "settled";
-        currentGameState.winner = winnerPubkey.toString();
-      }
-
-      return {
-        success: true,
-        signature: revealTxSig,
-        error: "UNDELEGATION_PENDING"
-      };
+    // All attempts failed — return pending for manual retry
+    console.log("⚠️ Undelegation still pending after all attempts.");
+    if (currentGameState) {
+      currentGameState.txSignatures.push(revealTxSig);
+      currentGameState.phase = "settled";
+      currentGameState.winner = winnerPubkey.toString();
     }
+
+    return {
+      success: true,
+      signature: revealTxSig,
+      error: "UNDELEGATION_PENDING"
+    };
   } catch (err: any) {
     console.error("❌ Failed to reveal winner on ER:", err);
     return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Send a client-side createCommitAndUndelegateInstruction to the ER Magic Program.
+ * This re-triggers commit+undelegate for the specified accounts.
+ * Returns the L1 commitment signature if successful, null otherwise.
+ */
+async function sendCommitAndUndelegateRetry(
+  wallet: WalletAdapter,
+  gamePDA: PublicKey,
+  hand1PDA: PublicKey,
+  hand2PDA: PublicKey
+): Promise<string | null> {
+  console.log("🔄 Sending createCommitAndUndelegateInstruction to ER Magic Program...");
+
+  const ix = createCommitAndUndelegateInstruction(
+    wallet.publicKey,
+    [gamePDA, hand1PDA, hand2PDA]
+  );
+
+  const recentBlockhash = (await erConnection.getLatestBlockhash()).blockhash;
+  const tx = new Transaction({ recentBlockhash, feePayer: wallet.publicKey });
+  tx.add(ix);
+
+  const signedTx = await wallet.signTransaction(tx);
+  const txSig = await erConnection.sendRawTransaction(signedTx.serialize(), {
+    skipPreflight: true,
+  });
+
+  console.log("✅ Commit+undelegate instruction sent to ER:", txSig);
+
+  // Use GetCommitmentSignature to track the L1 commitment
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  try {
+    const l1Sig = await GetCommitmentSignature(txSig, erConnection);
+    console.log("✅ L1 commitment confirmed from retry:", l1Sig);
+    return l1Sig;
+  } catch (e: any) {
+    console.log("⚠️ GetCommitmentSignature failed for retry TX:", e.message);
+    return null;
   }
 }
 
@@ -819,34 +937,63 @@ export async function verifyGameOnChain(gameId: number): Promise<boolean> {
 /**
  * Retry settlement after undelegation completes.
  * Call this when reveal_winner on ER succeeded but undelegation was slow.
- * Checks if the PDA is back on L1, then settles.
+ * Uses SDK createCommitAndUndelegateInstruction to re-trigger, then checks PDA.
  */
 export async function retrySettlement(
   wallet: WalletAdapter,
   gameId: number,
-  winnerPubkey: PublicKey
+  winnerPubkey: PublicKey,
+  player1Pubkey?: PublicKey,
+  player2Pubkey?: PublicKey
 ): Promise<TransactionResult> {
   try {
     const [gamePDA] = getGamePDA(BigInt(gameId));
 
-    // Poll a few times (up to ~15s) to give undelegation a chance
-    for (let i = 0; i < 3; i++) {
-      const gameAccount = await connection.getAccountInfo(gamePDA);
-      if (!gameAccount) {
-        return { success: false, error: "Game account not found" };
-      }
+    // Quick check — maybe it already came back
+    const gameAccount = await connection.getAccountInfo(gamePDA);
+    if (!gameAccount) {
+      return { success: false, error: "Game account not found" };
+    }
+    if (gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
+      console.log("✅ PDA is back on L1! Settling pot now...");
+      erRevealSent = false;
+      return await settlePotOnChain(wallet, gameId, winnerPubkey);
+    }
 
-      if (gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
-        // After reveal_winner, phase is Settled — use settle_pot (NOT settle_game)
+    // PDA still delegated — try SDK createCommitAndUndelegateInstruction to re-trigger
+    if (player1Pubkey && player2Pubkey) {
+      const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
+      const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
+
+      console.log("🔄 Re-triggering commit+undelegate via SDK...");
+      try {
+        const retrySig = await sendCommitAndUndelegateRetry(wallet, gamePDA, hand1PDA, hand2PDA);
+        if (retrySig) {
+          console.log("✅ SDK retry L1 commitment confirmed:", retrySig);
+          await new Promise(resolve => setTimeout(resolve, 3000));
+
+          const retryCheck = await connection.getAccountInfo(gamePDA);
+          if (retryCheck && retryCheck.owner.equals(new PublicKey(PROGRAM_ID))) {
+            console.log("✅ PDA back on L1 after SDK retry! Settling...");
+            erRevealSent = false;
+            return await settlePotOnChain(wallet, gameId, winnerPubkey);
+          }
+        }
+      } catch (sdkErr: any) {
+        console.log("⚠️ SDK retry failed:", sdkErr.message);
+      }
+    }
+
+    // Poll a few more times (up to ~15s)
+    for (let i = 0; i < 3; i++) {
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      const pollAccount = await connection.getAccountInfo(gamePDA);
+      if (pollAccount && pollAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
         console.log("✅ PDA is back on L1! Settling pot now...");
         erRevealSent = false;
         return await settlePotOnChain(wallet, gameId, winnerPubkey);
       }
-
-      if (i < 2) {
-        console.log(`⏳ PDA still delegated, checking again in 5s... (${i + 1}/3)`);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      }
+      console.log(`⏳ PDA still delegated (poll ${i + 1}/3)...`);
     }
 
     console.log("⏳ PDA still owned by delegation program, undelegation not complete yet");
