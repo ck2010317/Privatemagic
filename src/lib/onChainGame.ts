@@ -470,33 +470,24 @@ export async function revealWinnerOnChain(
   player2Pubkey: PublicKey
 ): Promise<TransactionResult> {
   const winnerPubkey = winnerIndex === 0 ? player1Pubkey : (winnerIndex === 1 ? player2Pubkey : wallet.publicKey);
-  const loserPubkey = winnerIndex === 0 ? player2Pubkey : player1Pubkey;
   const [gamePDA] = getGamePDA(BigInt(gameId));
   const [hand1PDA] = getPlayerHandPDA(BigInt(gameId), player1Pubkey);
   const [hand2PDA] = getPlayerHandPDA(BigInt(gameId), player2Pubkey);
   const gameIdBN = new BN(gameId);
 
-  // === Step 1: Try direct L1 settlement (works if already undelegated) ===
+  // === Step 1: Check if PDA is already back on L1 (skip ER flow if so) ===
   try {
-    console.log("🏆 Attempting direct L1 settle_pot...");
-    const directResult = await settlePotOnChain(wallet, gameId, winnerPubkey);
-    if (directResult.success) {
-      console.log("✅ Direct L1 settle_pot succeeded!");
-      erRevealSent = false;
-      return directResult;
-    }
-  } catch (directErr: any) {
-    // Try settle_game as fallback (works from any phase)
-    try {
-      const fallback = await settleGameOnChain(wallet, gameId, winnerIndex, winnerPubkey, loserPubkey, 0);
-      if (fallback.success) {
-        console.log("✅ Direct L1 settle_game succeeded!");
+    const gameAccount = await connection.getAccountInfo(gamePDA);
+    if (gameAccount && gameAccount.owner.equals(new PublicKey(PROGRAM_ID))) {
+      console.log("✅ PDA already on L1, settling directly...");
+      const directResult = await settlePotOnChain(wallet, gameId, winnerPubkey);
+      if (directResult.success) {
         erRevealSent = false;
-        return fallback;
+        return directResult;
       }
-    } catch (e: any) {
-      console.log("Direct L1 failed (game likely delegated):", e.message?.slice(0, 100));
     }
+  } catch (e: any) {
+    // PDA still delegated — proceed with ER flow
   }
 
   // === Step 2: advance_phase × 4 on ER to reach Showdown ===
